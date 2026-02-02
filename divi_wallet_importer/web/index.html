@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; connect-src {{API_BASE}};">
+    <title>Divi Wallet Importer for Divi Desktop</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container { max-width: 800px; width: 100%; }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            font-size: 1.4em;
+            background: linear-gradient(135deg, #EC2C1C, #EC1C62);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid #1f3460;
+        }
+        .info-text {
+            color: #a0a0b0;
+            font-size: 0.95em;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        .security-notice {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 0.85em;
+            color: #8b949e;
+            margin-top: 12px;
+        }
+        .security-notice strong { color: #58a6ff; }
+        .btn {
+            border: none;
+            border-radius: 8px;
+            padding: 12px 28px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: opacity 0.2s, transform 0.1s;
+            display: inline-block;
+        }
+        .btn:hover { opacity: 0.9; }
+        .btn:active { transform: scale(0.98); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary {
+            background: linear-gradient(135deg, #EC2C1C, #EC1C62);
+            color: white;
+        }
+        .btn-secondary {
+            background: #5D5E63;
+            color: white;
+        }
+        .btn-secondary:hover { background: #323235; }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #30363d;
+            color: #a0a0b0;
+        }
+        .btn-outline:hover { background: #1f3460; color: #e0e0e0; }
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn-link {
+            background: none;
+            border: none;
+            color: #58a6ff;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.95em;
+            text-decoration: underline;
+            padding: 0;
+        }
+        .question-text {
+            font-size: 1.1em;
+            text-align: center;
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+        .question-sub {
+            color: #8b949e;
+            font-size: 0.9em;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .status {
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 0.95em;
+            text-align: center;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .status.show { display: block; }
+        .status.success { background: #0d2818; border: 1px solid #238636; color: #3fb950; }
+        .status.error { background: #2d1117; border: 1px solid #da3633; color: #f85149; }
+        .status.warning { background: #2d1f00; border: 1px solid #d29922; color: #e3b341; }
+        .status.info { background: #0d1117; border: 1px solid #30363d; color: #8b949e; }
+        .grid-label {
+            color: #a0a0b0;
+            font-size: 0.85em;
+            margin-bottom: 16px;
+        }
+        .word-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        @media (max-width: 600px) { .word-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 400px) { .word-grid { grid-template-columns: repeat(2, 1fr); } }
+        .word-input-group { display: flex; flex-direction: column; gap: 4px; }
+        .word-input-group label { font-size: 0.75em; color: #6c7086; font-weight: 500; }
+        .word-input-group input {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 10px 8px;
+            color: #e0e0e0;
+            font-size: 0.9em;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            width: 100%;
+        }
+        .word-input-group input:focus { border-color: #EC2C1C; }
+        .steps {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .step-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #30363d;
+            transition: background 0.3s;
+        }
+        .step-dot.active { background: #EC2C1C; }
+        .step-dot.done { background: #3fb950; }
+        .spinner {
+            display: none;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+        }
+        .spinner.show { display: flex; }
+        .spinner-icon {
+            width: 48px; height: 48px;
+            border: 4px solid #30363d;
+            border-top-color: #EC2C1C;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .recovery-section { margin-top: 16px; }
+        .recovery-section h3 {
+            color: #3fb950;
+            margin-bottom: 12px;
+            font-size: 1.1em;
+        }
+        .recovery-section h4 {
+            color: #e3b341;
+            margin: 16px 0 8px;
+            font-size: 1em;
+        }
+        .recovery-section ol, .recovery-section ul {
+            color: #a0a0b0;
+            padding-left: 20px;
+            line-height: 2;
+        }
+        code {
+            background: #0d1117;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #79c0ff;
+        }
+        .clear-notice {
+            color: #6c7086;
+            font-size: 0.8em;
+            text-align: center;
+            margin-top: 8px;
+            display: none;
+        }
+        .clear-notice.show { display: block; }
+        .step-section { display: none; }
+        .step-section.active { display: block; }
+        .help-links {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+        .help-links a {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 0.9em;
+        }
+        .help-links a:hover { text-decoration: underline; }
+        .important-note {
+            background: #2d1f00;
+            border: 1px solid #d29922;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 12px 0;
+            color: #e3b341;
+            font-size: 0.9em;
+        }
+        .footer {
+            text-align: center;
+            color: #6c7086;
+            font-size: 0.8em;
+            margin-top: 20px;
+            padding-bottom: 40px;
+        }
+        .platform-badge {
+            text-align: center;
+            color: #6c7086;
+            font-size: 0.8em;
+            margin-bottom: 12px;
+        }
+        .progress-log {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 12px 0;
+            font-family: monospace;
+            font-size: 0.85em;
+            color: #79c0ff;
+            min-height: 60px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <svg width="50" height="50" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                <defs><linearGradient x1="0%" y1="0%" x2="100%" y2="100%" id="dG"><stop stop-color="#EC2C1C" offset="0%"/><stop stop-color="#EC1C62" offset="100%"/></linearGradient></defs>
+                <rect fill="url(#dG)" width="200" height="200" rx="100"/>
+                <path d="M48.77,52.34C71.38,52.34 90.37,52.34 105.74,52.34C128.79,52.34 152.77,67.92 152.77,100.36C152.77,132.79 128.79,148.34 105.74,148.34C90.37,148.34 76.36,148.34 63.71,148.34L63.71,96.46L88.11,96.46L88.11,124.99C91.73,124.99 97.15,124.99 104.38,124.99C115.23,124.99 127.43,113.32 127.43,100.34C127.43,87.37 115.23,75.69 104.38,75.69C93.54,75.69 93.51,75.69 77.24,75.69C65.49,75.69 56.00,67.91 48.77,52.34Z" fill="#FFF"/>
+            </svg>
+            <h1>Divi Wallet Importer for Divi Desktop</h1>
+        </div>
+
+        <!-- Platform detection badge -->
+        <div class="platform-badge" id="platformBadge">Detecting platform...</div>
+
+        <!-- Step indicator -->
+        <div class="steps" id="stepDots">
+            <div class="step-dot active" data-step="0"></div>
+            <div class="step-dot" data-step="1"></div>
+            <div class="step-dot" data-step="2"></div>
+            <div class="step-dot" data-step="3"></div>
+            <div class="step-dot" data-step="4"></div>
+        </div>
+
+        <!-- Status message area -->
+        <div class="status" id="statusMsg"></div>
+
+        <!-- STEP 0: Welcome / Prerequisites -->
+        <div class="step-section active" id="step0">
+            <div class="card">
+                <p class="info-text">
+                    This tool helps you import your 12-word mnemonic seed phrase from <strong>Divi Wallet Mobile</strong>
+                    into the <strong>Divi Desktop Application</strong>. It will guide you through every step of the recovery process.
+                </p>
+                <div class="security-notice">
+                    <strong>Security:</strong> This tool runs on your local machine only. Your seed phrase never leaves your computer.
+                    The server is bound to 127.0.0.1 and all API calls require a session token.
+                </div>
+            </div>
+            <div class="card">
+                <p class="question-text">Do you have <strong>Divi Desktop Application</strong> installed?</p>
+                <div class="btn-group">
+                    <button class="btn btn-secondary" onclick="onDiviInstalled(true)">Yes</button>
+                    <button class="btn btn-secondary" onclick="onDiviInstalled(false)">No</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 0b: Not installed -->
+        <div class="step-section" id="step0b">
+            <div class="card">
+                <p class="question-text">You need to install Divi Desktop first.</p>
+                <p class="question-sub">Download it from the official website, install it, and allow it to fully sync with the blockchain before continuing.</p>
+                <div class="btn-group">
+                    <a href="https://diviproject.org/downloads" target="_blank" rel="noopener" class="btn btn-primary">Download Divi Desktop</a>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-outline" onclick="goToStep(0)">Go Back</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 0c: Synced check -->
+        <div class="step-section" id="step0c">
+            <div class="card">
+                <p class="question-text">Is your Divi Desktop Application <strong>fully synced</strong>?</p>
+                <p class="question-sub">The blockchain must be fully synced before attempting wallet recovery.</p>
+                <div class="btn-group">
+                    <button class="btn btn-secondary" onclick="onDiviSynced(true)">Yes, it&rsquo;s synced</button>
+                    <button class="btn btn-secondary" onclick="onDiviSynced(false)">No, not yet</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 0d: Not synced -->
+        <div class="step-section" id="step0d">
+            <div class="card">
+                <p class="question-text">Please sync your Divi Desktop and try again.</p>
+                <p class="question-sub">Open Divi Desktop and wait for the blockchain to fully synchronize. This may take some time on first run.</p>
+                <div class="btn-group">
+                    <button class="btn btn-outline" onclick="goToStep(0)">Start Over</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 1: Wallet backup check -->
+        <div class="step-section" id="step1">
+            <div class="card" id="walletCheckCard">
+                <p class="question-text" id="walletQuestion">Checking for existing wallet...</p>
+                <div class="spinner show" id="walletSpinner"><div class="spinner-icon"></div></div>
+                <div id="walletActions" style="display:none;"></div>
+            </div>
+        </div>
+
+        <!-- STEP 2: Mnemonic entry -->
+        <div class="step-section" id="step2">
+            <div class="card">
+                <p class="grid-label">Enter your 12-word mnemonic seed phrase (lowercase):</p>
+                <div class="important-note">
+                    Seed words from Divi Wallet are displayed in UPPERCASE, but you must enter them in <strong>lowercase</strong> for validation.
+                </div>
+                <div class="word-grid" id="wordGrid"></div>
+                <div class="spinner" id="validationSpinner">
+                    <div class="spinner-icon"></div>
+                </div>
+                <button class="btn btn-primary" id="validateBtn" onclick="handleValidate()" style="display:block;margin:0 auto;">Validate Mnemonic</button>
+                <div class="clear-notice" id="clearNotice">Fields will be cleared in a moment for security.</div>
+            </div>
+        </div>
+
+        <!-- STEP 3: Recovery progress -->
+        <div class="step-section" id="step3">
+            <div class="card">
+                <div class="recovery-section">
+                    <h3>Recovery in Progress</h3>
+                    <div class="important-note">Do not close this window or Divi Desktop while recovery is running.</div>
+                    <div class="progress-log" id="progressLog">Starting recovery...</div>
+                    <div class="spinner show" id="recoverySpinner"><div class="spinner-icon"></div></div>
+                    <div id="recoveryActions" style="display:none;">
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="onLaunchDesktop()">Launch Divi Desktop</button>
+                            <button class="btn btn-outline" onclick="goToStep(4)">Continue to Post-Recovery</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 4: Post-recovery -->
+        <div class="step-section" id="step4">
+            <div class="card">
+                <div class="recovery-section">
+                    <h3>Post-Recovery Checklist</h3>
+                    <ol>
+                        <li>Be patient while Divi Desktop syncs and rescans</li>
+                        <li>When the &ldquo;Encrypt Wallet&rdquo; pop-up appears, close it (wait to encrypt for now)</li>
+                        <li>Check that your balance has been successfully migrated</li>
+                        <li>Close Divi Desktop completely</li>
+                        <li>Restart Divi Desktop</li>
+                        <li>Click the black triangle icon and <strong>set a password</strong> to encrypt your wallet</li>
+                    </ol>
+                    <div class="important-note">
+                        Once you have confirmed your balance, make sure to encrypt your wallet with a strong password.
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-outline" onclick="onClose()">Close Importer</button>
+                    <button class="btn btn-outline" onclick="goToStep(0)">Start Over</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Help links -->
+        <div class="help-links">
+            <a href="https://discord.gg/diviproject" target="_blank" rel="noopener">Need help? Join Divi Discord</a>
+            <a href="https://diviproject.org/downloads" target="_blank" rel="noopener">Download Divi Desktop</a>
+        </div>
+
+        <div class="footer">
+            Divi Wallet Importer &mdash; Local Server Mode. All operations happen on your machine.
+        </div>
+    </div>
+
+    <script>
+    // API configuration (injected by server)
+    var API_BASE = '{{API_BASE}}';
+    var SESSION_TOKEN = '{{SESSION_TOKEN}}';
+
+    // BIP39 English wordlist (2048 words)
+    var W=["abandon","ability","able","about","above","absent","absorb","abstract","absurd","abuse","access","accident","account","accuse","achieve","acid","acoustic","acquire","across","act","action","actor","actress","actual","adapt","add","addict","address","adjust","admit","adult","advance","advice","aerobic","affair","afford","afraid","again","age","agent","agree","ahead","aim","air","airport","aisle","alarm","album","alcohol","alert","alien","all","alley","allow","almost","alone","alpha","already","also","alter","always","amateur","amazing","among","amount","amused","analyst","anchor","ancient","anger","angle","angry","animal","ankle","announce","annual","another","answer","antenna","antique","anxiety","any","apart","apology","appear","apple","approve","april","arch","arctic","area","arena","argue","arm","armed","armor","army","around","arrange","arrest","arrive","arrow","art","artefact","artist","artwork","ask","aspect","assault","asset","assist","assume","asthma","athlete","atom","attack","attend","attitude","attract","auction","audit","august","aunt","author","auto","autumn","average","avocado","avoid","awake","aware","away","awesome","awful","awkward","axis","baby","bachelor","bacon","badge","bag","balance","balcony","ball","bamboo","banana","banner","bar","barely","bargain","barrel","base","basic","basket","battle","beach","bean","beauty","because","become","beef","before","begin","behave","behind","believe","below","belt","bench","benefit","best","betray","better","between","beyond","bicycle","bid","bike","bind","biology","bird","birth","bitter","black","blade","blame","blanket","blast","bleak","bless","blind","blood","blossom","blouse","blue","blur","blush","board","boat","body","boil","bomb","bone","bonus","book","boost","border","boring","borrow","boss","bottom","bounce","box","boy","bracket","brain","brand","brass","brave","bread","breeze","brick","bridge","brief","bright","bring","brisk","broccoli","broken","bronze","broom","brother","brown","brush","bubble","buddy","budget","buffalo","build","bulb","bulk","bullet","bundle","bunker","burden","burger","burst","bus","business","busy","butter","buyer","buzz","cabbage","cabin","cable","cactus","cage","cake","call","calm","camera","camp","can","canal","cancel","candy","cannon","canoe","canvas","canyon","capable","capital","captain","car","carbon","card","cargo","carpet","carry","cart","case","cash","casino","castle","casual","cat","catalog","catch","category","cattle","caught","cause","caution","cave","ceiling","celery","cement","census","century","cereal","certain","chair","chalk","champion","change","chaos","chapter","charge","chase","chat","cheap","check","cheese","chef","cherry","chest","chicken","chief","child","chimney","choice","choose","chronic","chuckle","chunk","churn","cigar","cinnamon","circle","citizen","city","civil","claim","clap","clarify","claw","clay","clean","clerk","clever","click","client","cliff","climb","clinic","clip","clock","clog","close","cloth","cloud","clown","club","clump","cluster","clutch","coach","coast","coconut","code","coffee","coil","coin","collect","color","column","combine","come","comfort","comic","common","company","concert","conduct","confirm","congress","connect","consider","control","convince","cook","cool","copper","copy","coral","core","corn","correct","cost","cotton","couch","country","couple","course","cousin","cover","coyote","crack","cradle","craft","cram","crane","crash","crater","crawl","crazy","cream","credit","creek","crew","cricket","crime","crisp","critic","crop","cross","crouch","crowd","crucial","cruel","cruise","crumble","crunch","crush","cry","crystal","cube","culture","cup","cupboard","curious","current","curtain","curve","cushion","custom","cute","cycle","dad","damage","damp","dance","danger","daring","dash","daughter","dawn","day","deal","debate","debris","decade","december","decide","decline","decorate","decrease","deer","defense","define","defy","degree","delay","deliver","demand","demise","denial","dentist","deny","depart","depend","deposit","depth","deputy","derive","describe","desert","design","desk","despair","destroy","detail","detect","develop","device","devote","diagram","dial","diamond","diary","dice","diesel","diet","differ","digital","dignity","dilemma","dinner","dinosaur","direct","dirt","disagree","discover","disease","dish","dismiss","disorder","display","distance","divert","divide","divorce","dizzy","doctor","document","dog","doll","dolphin","domain","donate","donkey","donor","door","dose","double","dove","draft","dragon","drama","drastic","draw","dream","dress","drift","drill","drink","drip","drive","drop","drum","dry","duck","dumb","dune","during","dust","dutch","duty","dwarf","dynamic","eager","eagle","early","earn","earth","easily","east","easy","echo","ecology","economy","edge","edit","educate","effort","egg","eight","either","elbow","elder","electric","elegant","element","elephant","elevator","elite","else","embark","embody","embrace","emerge","emotion","employ","empower","empty","enable","enact","end","endless","endorse","enemy","energy","enforce","engage","engine","enhance","enjoy","enlist","enough","enrich","enroll","ensure","enter","entire","entry","envelope","episode","equal","equip","era","erase","erode","erosion","error","erupt","escape","essay","essence","estate","eternal","ethics","evidence","evil","evoke","evolve","exact","example","excess","exchange","excite","exclude","excuse","execute","exercise","exhaust","exhibit","exile","exist","exit","exotic","expand","expect","expire","explain","expose","express","extend","extra","eye","eyebrow","fabric","face","faculty","fade","faint","faith","fall","false","fame","family","famous","fan","fancy","fantasy","farm","fashion","fat","fatal","father","fatigue","fault","favorite","feature","february","federal","fee","feed","feel","female","fence","festival","fetch","fever","few","fiber","fiction","field","figure","file","film","filter","final","find","fine","finger","finish","fire","firm","first","fiscal","fish","fit","fitness","fix","flag","flame","flash","flat","flavor","flee","flight","flip","float","flock","floor","flower","fluid","flush","fly","foam","focus","fog","foil","fold","follow","food","foot","force","forest","forget","fork","fortune","forum","forward","fossil","foster","found","fox","fragile","frame","frequent","fresh","friend","fringe","frog","front","frost","frown","frozen","fruit","fuel","fun","funny","furnace","fury","future","gadget","gain","galaxy","gallery","game","gap","garage","garbage","garden","garlic","garment","gas","gasp","gate","gather","gauge","gaze","general","genius","genre","gentle","genuine","gesture","ghost","giant","gift","giggle","ginger","giraffe","girl","give","glad","glance","glare","glass","glide","glimpse","globe","gloom","glory","glove","glow","glue","goat","goddess","gold","good","goose","gorilla","gospel","gossip","govern","gown","grab","grace","grain","grant","grape","grass","gravity","great","green","grid","grief","grit","grocery","group","grow","grunt","guard","guess","guide","guilt","guitar","gun","gym","habit","hair","half","hammer","hamster","hand","happy","harbor","hard","harsh","harvest","hat","have","hawk","hazard","head","health","heart","heavy","hedgehog","height","hello","helmet","help","hen","hero","hidden","high","hill","hint","hip","hire","history","hobby","hockey","hold","hole","holiday","hollow","home","honey","hood","hope","horn","horror","horse","hospital","host","hotel","hour","hover","hub","huge","human","humble","humor","hundred","hungry","hunt","hurdle","hurry","hurt","husband","hybrid","ice","icon","idea","identify","idle","ignore","ill","illegal","illness","image","imitate","immense","immune","impact","impose","improve","impulse","inch","include","income","increase","index","indicate","indoor","industry","infant","inflict","inform","inhale","inherit","initial","inject","injury","inmate","inner","innocent","input","inquiry","insane","insect","inside","inspire","install","intact","interest","into","invest","invite","involve","iron","island","isolate","issue","item","ivory","jacket","jaguar","jar","jazz","jealous","jeans","jelly","jewel","job","join","joke","journey","joy","judge","juice","jump","jungle","junior","junk","just","kangaroo","keen","keep","ketchup","key","kick","kid","kidney","kind","kingdom","kiss","kit","kitchen","kite","kitten","kiwi","knee","knife","knock","know","lab","label","labor","ladder","lady","lake","lamp","language","laptop","large","later","latin","laugh","laundry","lava","law","lawn","lawsuit","layer","lazy","leader","leaf","learn","leave","lecture","left","leg","legal","legend","leisure","lemon","lend","length","lens","leopard","lesson","letter","level","liar","liberty","library","license","life","lift","light","like","limb","limit","link","lion","liquid","list","little","live","lizard","load","loan","lobster","local","lock","logic","lonely","long","loop","lottery","loud","lounge","love","loyal","lucky","luggage","lumber","lunar","lunch","luxury","lyrics","machine","mad","magic","magnet","maid","mail","main","major","make","mammal","man","manage","mandate","mango","mansion","manual","maple","marble","march","margin","marine","market","marriage","mask","mass","master","match","material","math","matrix","matter","maximum","maze","meadow","mean","measure","meat","mechanic","medal","media","melody","melt","member","memory","mention","menu","mercy","merge","merit","merry","mesh","message","metal","method","middle","midnight","milk","million","mimic","mind","minimum","minor","minute","miracle","mirror","misery","miss","mistake","mix","mixed","mixture","mobile","model","modify","mom","moment","monitor","monkey","monster","month","moon","moral","more","morning","mosquito","mother","motion","motor","mountain","mouse","move","movie","much","muffin","mule","multiply","muscle","museum","mushroom","music","must","mutual","myself","mystery","myth","naive","name","napkin","narrow","nasty","nation","nature","near","neck","need","negative","neglect","neither","nephew","nerve","nest","net","network","neutral","never","news","next","nice","night","noble","noise","nominee","noodle","normal","north","nose","notable","note","nothing","notice","novel","now","nuclear","number","nurse","nut","oak","obey","object","oblige","obscure","observe","obtain","obvious","occur","ocean","october","odor","off","offer","office","often","oil","okay","old","olive","olympic","omit","once","one","onion","online","only","open","opera","opinion","oppose","option","orange","orbit","orchard","order","ordinary","organ","orient","original","orphan","ostrich","other","outdoor","outer","output","outside","oval","oven","over","own","owner","oxygen","oyster","ozone","pact","paddle","page","pair","palace","palm","panda","panel","panic","panther","paper","parade","parent","park","parrot","party","pass","patch","path","patient","patrol","pattern","pause","pave","payment","peace","peanut","pear","peasant","pelican","pen","penalty","pencil","people","pepper","perfect","permit","person","pet","phone","photo","phrase","physical","piano","picnic","picture","piece","pig","pigeon","pill","pilot","pink","pioneer","pipe","pistol","pitch","pizza","place","planet","plastic","plate","play","please","pledge","pluck","plug","plunge","poem","poet","point","polar","pole","police","pond","pony","pool","popular","portion","position","possible","post","potato","pottery","poverty","powder","power","practice","praise","predict","prefer","prepare","present","pretty","prevent","price","pride","primary","print","priority","prison","private","prize","problem","process","produce","profit","program","project","promote","proof","property","prosper","protect","proud","provide","public","pudding","pull","pulp","pulse","pumpkin","punch","pupil","puppy","purchase","purity","purpose","purse","push","put","puzzle","pyramid","quality","quantum","quarter","question","quick","quit","quiz","quote","rabbit","raccoon","race","rack","radar","radio","rail","rain","raise","rally","ramp","ranch","random","range","rapid","rare","rate","rather","raven","raw","razor","ready","real","reason","rebel","rebuild","recall","receive","recipe","record","recycle","reduce","reflect","reform","refuse","region","regret","regular","reject","relax","release","relief","rely","remain","remember","remind","remove","render","renew","rent","reopen","repair","repeat","replace","report","require","rescue","resemble","resist","resource","response","result","retire","retreat","return","reunion","reveal","review","reward","rhythm","rib","ribbon","rice","rich","ride","ridge","rifle","right","rigid","ring","riot","ripple","risk","ritual","rival","river","road","roast","robot","robust","rocket","romance","roof","rookie","room","rose","rotate","rough","round","route","royal","rubber","rude","rug","rule","run","runway","rural","sad","saddle","sadness","safe","sail","salad","salmon","salon","salt","salute","same","sample","sand","satisfy","satoshi","sauce","sausage","save","say","scale","scan","scare","scatter","scene","scheme","school","science","scissors","scorpion","scout","scrap","screen","script","scrub","sea","search","season","seat","second","secret","section","security","seed","seek","segment","select","sell","seminar","senior","sense","sentence","series","service","session","settle","setup","seven","shadow","shaft","shallow","share","shed","shell","sheriff","shield","shift","shine","ship","shiver","shock","shoe","shoot","shop","short","shoulder","shove","shrimp","shrug","shuffle","shy","sibling","sick","side","siege","sight","sign","silent","silk","silly","silver","similar","simple","since","sing","siren","sister","situate","six","size","skate","sketch","ski","skill","skin","skirt","skull","slab","slam","sleep","slender","slice","slide","slight","slim","slogan","slot","slow","slush","small","smart","smile","smoke","smooth","snack","snake","snap","sniff","snow","soap","soccer","social","sock","soda","soft","solar","soldier","solid","solution","solve","someone","song","soon","sorry","sort","soul","sound","soup","source","south","space","spare","spatial","spawn","speak","special","speed","spell","spend","sphere","spice","spider","spike","spin","spirit","split","spoil","sponsor","spoon","sport","spot","spray","spread","spring","spy","square","squeeze","squirrel","stable","stadium","staff","stage","stairs","stamp","stand","start","state","stay","steak","steel","stem","step","stereo","stick","still","sting","stock","stomach","stone","stool","story","stove","strategy","street","strike","strong","struggle","student","stuff","stumble","style","subject","submit","subway","success","such","sudden","suffer","sugar","suggest","suit","summer","sun","sunny","sunset","super","supply","supreme","sure","surface","surge","surprise","surround","survey","suspect","sustain","swallow","swamp","swap","swarm","swear","sweet","swift","swim","swing","switch","sword","symbol","symptom","syrup","system","table","tackle","tag","tail","talent","talk","tank","tape","target","task","taste","tattoo","taxi","teach","team","tell","ten","tenant","tennis","tent","term","test","text","thank","that","theme","then","theory","there","they","thing","this","thought","three","thrive","throw","thumb","thunder","ticket","tide","tiger","tilt","timber","time","tiny","tip","tired","tissue","title","toast","tobacco","today","toddler","toe","together","toilet","token","tomato","tomorrow","tone","tongue","tonight","tool","tooth","top","topic","topple","torch","tornado","tortoise","toss","total","tourist","toward","tower","town","toy","track","trade","traffic","tragic","train","transfer","trap","trash","travel","tray","treat","tree","trend","trial","tribe","trick","trigger","trim","trip","trophy","trouble","truck","true","truly","trumpet","trust","truth","try","tube","tuition","tumble","tuna","tunnel","turkey","turn","turtle","twelve","twenty","twice","twin","twist","two","type","typical","ugly","umbrella","unable","unaware","uncle","uncover","under","undo","unfair","unfold","unhappy","uniform","unique","unit","universe","unknown","unlock","until","unusual","unveil","update","upgrade","uphold","upon","upper","upset","urban","urge","usage","use","used","useful","useless","usual","utility","vacant","vacuum","vague","valid","valley","valve","van","vanish","vapor","various","vast","vault","vehicle","velvet","vendor","venture","venue","verb","verify","version","very","vessel","veteran","viable","vibrant","vicious","victory","video","view","village","vintage","violin","virtual","virus","visa","visit","visual","vital","vivid","vocal","voice","void","volcano","volume","vote","voyage","wage","wagon","wait","walk","wall","walnut","want","warfare","warm","warrior","wash","wasp","waste","water","wave","way","wealth","weapon","wear","weasel","weather","web","wedding","weekend","weird","welcome","west","wet","whale","what","wheat","wheel","when","where","whip","whisper","wide","width","wife","wild","will","win","window","wine","wing","wink","winner","winter","wire","wisdom","wise","wish","witness","wolf","woman","wonder","wood","wool","word","work","world","worry","worth","wrap","wreck","wrestle","wrist","write","wrong","yard","year","yellow","you","young","youth","zebra","zero","zone","zoo"];
+
+    // State
+    var currentStep = 0;
+    var statusTimeout = null;
+    var serverPlatform = null;
+    var pollTimer = null;
+
+    // API helpers
+    function apiGet(path) {
+        return fetch(API_BASE + path, {
+            headers: { 'X-Session-Token': SESSION_TOKEN }
+        }).then(function(r) { return r.json(); });
+    }
+
+    function apiPost(path, body) {
+        return fetch(API_BASE + path, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Session-Token': SESSION_TOKEN
+            },
+            body: body ? JSON.stringify(body) : undefined
+        }).then(function(r) { return r.json(); });
+    }
+
+    // Platform display names
+    function platformDisplayName(plat) {
+        if (plat === 'windows') return 'Windows';
+        if (plat === 'macos') return 'macOS';
+        if (plat === 'linux') return 'Linux';
+        return plat;
+    }
+
+    // Navigation
+    function showSection(id) {
+        document.querySelectorAll('.step-section').forEach(function(s) { s.className = 'step-section'; });
+        var el = document.getElementById(id);
+        if (el) el.className = 'step-section active';
+    }
+
+    function updateStepDots(step) {
+        currentStep = step;
+        document.querySelectorAll('.step-dot').forEach(function(dot, i) {
+            dot.className = 'step-dot' + (i === step ? ' active' : (i < step ? ' done' : ''));
+        });
+    }
+
+    function goToStep(step) {
+        hideStatus();
+        if (step === 0) { showSection('step0'); updateStepDots(0); }
+        else if (step === 1) { checkWalletAndShow(); showSection('step1'); updateStepDots(1); }
+        else if (step === 2) { showSection('step2'); updateStepDots(2); }
+        else if (step === 3) { showSection('step3'); updateStepDots(3); }
+        else if (step === 4) { stopPolling(); showSection('step4'); updateStepDots(4); }
+    }
+
+    // Status messages
+    function showStatus(msg, type, autoHide) {
+        var el = document.getElementById('statusMsg');
+        el.textContent = msg;
+        el.className = 'status show ' + type;
+        if (statusTimeout) clearTimeout(statusTimeout);
+        if (autoHide) {
+            statusTimeout = setTimeout(hideStatus, 3000);
+        }
+    }
+
+    function hideStatus() {
+        var el = document.getElementById('statusMsg');
+        el.className = 'status';
+        if (statusTimeout) { clearTimeout(statusTimeout); statusTimeout = null; }
+    }
+
+    // Step 0: Prerequisites
+    function onDiviInstalled(yes) {
+        if (yes) {
+            showSection('step0c');
+        } else {
+            showSection('step0b');
+        }
+    }
+
+    function onDiviSynced(yes) {
+        if (yes) {
+            goToStep(1);
+        } else {
+            showSection('step0d');
+        }
+    }
+
+    // Step 1: Wallet check (server-side)
+    function checkWalletAndShow() {
+        var spinner = document.getElementById('walletSpinner');
+        var question = document.getElementById('walletQuestion');
+        var actions = document.getElementById('walletActions');
+
+        spinner.className = 'spinner show';
+        actions.style.display = 'none';
+        question.textContent = 'Checking for existing wallet...';
+
+        apiGet('/api/wallet/check').then(function(data) {
+            spinner.className = 'spinner';
+            if (data.exists) {
+                question.textContent = 'An existing wallet.dat was found.';
+                actions.style.display = 'block';
+                actions.innerHTML =
+                    '<p class="info-text" style="text-align:center;">Location: <code>' + data.path + '</code></p>' +
+                    '<div class="important-note">Your existing wallet.dat will be backed up (renamed with a timestamp) before recovery.</div>' +
+                    '<div class="btn-group">' +
+                    '<button class="btn btn-primary" onclick="onBackupWallet()">Back Up &amp; Continue</button>' +
+                    '<button class="btn btn-outline" onclick="goToStep(0)">Cancel</button>' +
+                    '</div>';
+            } else {
+                question.textContent = 'No existing wallet.dat found.';
+                actions.style.display = 'block';
+                actions.innerHTML =
+                    '<p class="info-text" style="text-align:center;">Proceeding directly to seed entry.</p>' +
+                    '<div class="btn-group">' +
+                    '<button class="btn btn-primary" onclick="goToStep(2)">Continue</button>' +
+                    '<button class="btn btn-outline" onclick="goToStep(0)">Go Back</button>' +
+                    '</div>';
+            }
+        }).catch(function(err) {
+            spinner.className = 'spinner';
+            question.textContent = 'Error checking wallet.';
+            showStatus('Failed to check wallet: ' + err.message, 'error');
+        });
+    }
+
+    function onBackupWallet() {
+        showStatus('Backing up wallet...', 'info');
+        apiPost('/api/wallet/backup').then(function(data) {
+            if (data.success) {
+                showStatus(data.message, 'success', true);
+                goToStep(2);
+            } else {
+                showStatus('Backup failed: ' + data.message, 'error');
+            }
+        }).catch(function(err) {
+            showStatus('Backup error: ' + err.message, 'error');
+        });
+    }
+
+    // Step 2: Mnemonic validation (client-side, same as before)
+    function getWords() {
+        var words = [];
+        for (var i = 0; i < 12; i++) {
+            words.push(document.getElementById('word' + i).value.trim().toLowerCase());
+        }
+        return words;
+    }
+
+    function clearFields() {
+        for (var i = 0; i < 12; i++) {
+            document.getElementById('word' + i).value = '';
+        }
+        document.getElementById('clearNotice').className = 'clear-notice';
+    }
+
+    function validateBIP39(words) {
+        if (words.length !== 12) {
+            return Promise.resolve({ valid: false, error: 'Mnemonic must be exactly 12 words.' });
+        }
+        var indices = [];
+        for (var i = 0; i < words.length; i++) {
+            var idx = W.indexOf(words[i]);
+            if (idx === -1) {
+                return Promise.resolve({ valid: false, error: 'Word "' + words[i] + '" (word ' + (i+1) + ') is not in the BIP39 wordlist.' });
+            }
+            indices.push(idx);
+        }
+        var bits = '';
+        for (var j = 0; j < indices.length; j++) {
+            bits += indices[j].toString(2).padStart(11, '0');
+        }
+        var entropyBits = bits.slice(0, 128);
+        var checksumBits = bits.slice(128);
+        var entropyBytes = new Uint8Array(16);
+        for (var k = 0; k < 16; k++) {
+            entropyBytes[k] = parseInt(entropyBits.slice(k * 8, (k + 1) * 8), 2);
+        }
+        return crypto.subtle.digest('SHA-256', entropyBytes).then(function(hashBuffer) {
+            var hashArray = new Uint8Array(hashBuffer);
+            var hashBits = hashArray[0].toString(2).padStart(8, '0').slice(0, 4);
+            if (hashBits !== checksumBits) {
+                return { valid: false, error: 'Invalid checksum. Please double-check your seed words.' };
+            }
+            return { valid: true };
+        });
+    }
+
+    function handleValidate() {
+        var btn = document.getElementById('validateBtn');
+        var spinner = document.getElementById('validationSpinner');
+        var clearNotice = document.getElementById('clearNotice');
+
+        btn.disabled = true;
+        btn.style.display = 'none';
+        spinner.className = 'spinner show';
+        clearNotice.className = 'clear-notice';
+        hideStatus();
+
+        var words = getWords();
+
+        if (words.some(function(w) { return w === ''; })) {
+            showStatus('Please fill all 12 fields before validating.', 'warning');
+            btn.disabled = false;
+            btn.style.display = 'block';
+            spinner.className = 'spinner';
+            return;
+        }
+
+        setTimeout(function() {
+            validateBIP39(words).then(function(result) {
+                spinner.className = 'spinner';
+
+                if (result.valid) {
+                    var mnemonic = words.join(' ');
+                    showStatus('Mnemonic is valid! Starting recovery...', 'success');
+                    clearNotice.className = 'clear-notice show';
+
+                    // Start recovery on server
+                    apiPost('/api/recovery/start', { mnemonic: mnemonic }).then(function(data) {
+                        mnemonic = '';
+                        if (data.success) {
+                            setTimeout(function() {
+                                clearFields();
+                                goToStep(3);
+                                startPolling();
+                            }, 1000);
+                        } else {
+                            showStatus('Recovery failed to start: ' + data.message, 'error');
+                            btn.disabled = false;
+                            btn.style.display = 'block';
+                        }
+                    }).catch(function(err) {
+                        mnemonic = '';
+                        showStatus('Recovery error: ' + err.message, 'error');
+                        btn.disabled = false;
+                        btn.style.display = 'block';
+                    });
+                } else {
+                    showStatus(result.error, 'error');
+                    btn.disabled = false;
+                    btn.style.display = 'block';
+                    setTimeout(function() {
+                        showStatus('Enter your 12-word mnemonic. Ensure all words are lowercase.', 'info', true);
+                    }, 3000);
+                }
+            }).catch(function(e) {
+                spinner.className = 'spinner';
+                showStatus('Validation error: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.style.display = 'block';
+            });
+            words = null;
+        }, 500);
+    }
+
+    // Step 3: Recovery polling
+    function startPolling() {
+        var log = document.getElementById('progressLog');
+        log.textContent = 'Recovery started...\n';
+
+        pollTimer = setInterval(function() {
+            apiGet('/api/recovery/status').then(function(data) {
+                var line = '[' + data.state + '] ' + data.message;
+                if (data.progress) line += ' (' + data.progress + ')';
+                log.textContent += line + '\n';
+                log.scrollTop = log.scrollHeight;
+
+                if (data.state === 'complete') {
+                    stopPolling();
+                    document.getElementById('recoverySpinner').className = 'spinner';
+                    document.getElementById('recoveryActions').style.display = 'block';
+                    showStatus('Recovery complete!', 'success');
+                } else if (data.state === 'error') {
+                    stopPolling();
+                    document.getElementById('recoverySpinner').className = 'spinner';
+                    showStatus('Recovery error: ' + data.message, 'error');
+                }
+            }).catch(function() {
+                // Server may have shut down
+            });
+        }, 3000);
+    }
+
+    function stopPolling() {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+    }
+
+    function onLaunchDesktop() {
+        apiPost('/api/launch-desktop').then(function(data) {
+            if (data.success) {
+                showStatus('Divi Desktop launched.', 'success', true);
+            } else {
+                showStatus(data.message, 'error');
+            }
+        });
+    }
+
+    function onClose() {
+        apiPost('/api/shutdown').then(function() {
+            document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;min-height:100vh;color:#8b949e;font-family:sans-serif;"><p>Server stopped. You can close this tab.</p></div>';
+        }).catch(function() {
+            document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;min-height:100vh;color:#8b949e;font-family:sans-serif;"><p>Server stopped. You can close this tab.</p></div>';
+        });
+    }
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+        stopPolling();
+        if (navigator.sendBeacon) {
+            var blob = new Blob([JSON.stringify({})], { type: 'application/json' });
+            // Note: sendBeacon can't set custom headers, so shutdown endpoint accepts beacon too
+        }
+    });
+
+    // Build word grid
+    (function() {
+        var grid = document.getElementById('wordGrid');
+        for (var i = 0; i < 12; i++) {
+            var group = document.createElement('div');
+            group.className = 'word-input-group';
+            var label = document.createElement('label');
+            label.textContent = 'Word ' + (i + 1);
+            label.setAttribute('for', 'word' + i);
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.id = 'word' + i;
+            input.autocomplete = 'off';
+            input.spellcheck = false;
+            input.setAttribute('autocapitalize', 'off');
+            input.setAttribute('autocorrect', 'off');
+            input.placeholder = (i + 1).toString();
+            group.appendChild(label);
+            group.appendChild(input);
+            grid.appendChild(group);
+        }
+
+        // Fetch platform info from server
+        apiGet('/api/platform').then(function(data) {
+            serverPlatform = data.platform;
+            document.getElementById('platformBadge').textContent =
+                'Platform: ' + platformDisplayName(data.platform);
+        }).catch(function() {
+            document.getElementById('platformBadge').textContent = 'Platform: unknown (server not reachable)';
+        });
+    })();
+
+    // Enter key triggers validation on step 2
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && document.getElementById('step2').classList.contains('active')) {
+            handleValidate();
+        }
+    });
+    </script>
+</body>
+</html>
