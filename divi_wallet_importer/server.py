@@ -100,6 +100,8 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
         if self.path == "/api/platform":
             self._send_json(api.get_platform_info())
+        elif self.path == "/api/prerequisites":
+            self._send_json(api.check_prerequisites())
         elif self.path == "/api/wallet/check":
             self._send_json(api.check_wallet())
         elif self.path == "/api/recovery/status":
@@ -117,6 +119,10 @@ class _RequestHandler(BaseHTTPRequestHandler):
             return
 
         if not self._check_token():
+            return
+
+        if self.path == "/api/daemon/stop":
+            self._send_json(api.stop_daemon())
             return
 
         if self.path == "/api/wallet/backup":

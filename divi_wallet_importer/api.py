@@ -1,6 +1,7 @@
 """Business logic for Divi Wallet Importer."""
 
 import os
+import re
 import json
 import shutil
 import datetime
@@ -8,12 +9,82 @@ import subprocess
 import threading
 import time
 import logging
+import logging.handlers
 from divi_wallet_importer import platform_utils
 from divi_wallet_importer.bip39 import validate_mnemonic
+from divi_wallet_importer.rpc import DiviRPC, RPCError, RPCConnectionError
 
+logger = logging.getLogger('divi_importer')
+
+# ---------------------------------------------------------------------------
+# Mnemonic redaction
+# ---------------------------------------------------------------------------
+
+class MnemonicRedactionFilter(logging.Filter):
+    """Scrub mnemonic seed phrases from all log output."""
+    def filter(self, record):
+        record.msg = re.sub(r'-mnemonic=[^\s\]]+', '-mnemonic=[REDACTED]', str(record.msg))
+        if hasattr(record, 'args') and record.args:
+            record.args = tuple(
+                re.sub(r'-mnemonic=[^\s\]]+', '-mnemonic=[REDACTED]', str(a))
+                if isinstance(a, str) else a
+                for a in record.args
+            )
+        return True
+
+
+def _setup_logging():
+    """Configure logging with mnemonic redaction and file output."""
+    if logger.handlers:
+        return  # already configured
+
+    logger.setLevel(logging.DEBUG)
+    redaction = MnemonicRedactionFilter()
+
+    # Console handler
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.addFilter(redaction)
+    console.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+    logger.addHandler(console)
+
+    # File handler
+    log_dir = platform_utils.get_log_directory()
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, 'importer.log')
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_path, maxBytes=2 * 1024 * 1024, backupCount=3
+        )
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.addFilter(redaction)
+        file_handler.setFormatter(
+            logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+        )
+        logger.addHandler(file_handler)
+    except OSError:
+        pass  # non-critical if log dir can't be created
+
+
+_setup_logging()
+
+# ---------------------------------------------------------------------------
 # Thread-safe recovery state
+# ---------------------------------------------------------------------------
+
 _recovery_lock = threading.Lock()
 _recovery_status = {"state": "idle", "message": "", "progress": ""}
+
+
+def _set_status(state, message, progress=""):
+    global _recovery_status
+    with _recovery_lock:
+        _recovery_status = {"state": state, "message": message, "progress": progress}
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def get_platform_info():
     """Return platform info dict: platform, divi_data_dir, wallet_exists, divi_desktop_data_dir"""
@@ -27,6 +98,57 @@ def get_platform_info():
         "wallet_exists": os.path.exists(wallet_path),
     }
 
+
+def check_prerequisites():
+    """Auto-detect Divi Desktop installation and sync status."""
+    plat = platform_utils.get_platform()
+    divi_dir = platform_utils.get_divi_data_dir()
+
+    # Check Divi Desktop executable
+    desktop_path = platform_utils.get_divi_desktop_executable()
+    if plat == "macos" and desktop_path.endswith(".app"):
+        desktop_installed = os.path.isdir(desktop_path)
+    else:
+        desktop_installed = os.path.isfile(desktop_path)
+
+    # Check daemon binary
+    daemon_found = False
+    daemon_path = ""
+    try:
+        daemon_path = platform_utils.get_daemon_path()
+        daemon_found = True
+    except FileNotFoundError as e:
+        daemon_path = str(e)
+
+    # Check if daemon is running on default ports
+    running_info = platform_utils.find_running_daemon()
+
+    # Check data directory
+    data_dir_exists = os.path.isdir(divi_dir)
+
+    # Check blockchain sync by looking for chain data
+    blockchain_synced = False
+    if data_dir_exists:
+        blocks_dir = os.path.join(divi_dir, "blocks")
+        chainstate_dir = os.path.join(divi_dir, "chainstate")
+        blockchain_synced = os.path.isdir(blocks_dir) and os.path.isdir(chainstate_dir)
+
+    return {
+        "platform": plat,
+        "desktop_installed": desktop_installed,
+        "desktop_path": desktop_path,
+        "daemon_found": daemon_found,
+        "daemon_path": daemon_path,
+        "data_dir_exists": data_dir_exists,
+        "blockchain_synced": blockchain_synced,
+        "divi_data_dir": divi_dir,
+        "daemon_running": running_info["running"],
+        "daemon_pid": running_info["pid"],
+        "rpc_port_open": running_info["rpc_port"],
+        "p2p_port_open": running_info["p2p_port"],
+    }
+
+
 def check_wallet():
     """Check if wallet.dat exists. Returns dict with exists, path."""
     divi_dir = platform_utils.get_divi_data_dir()
@@ -36,9 +158,9 @@ def check_wallet():
         "path": wallet_path,
     }
 
+
 def backup_wallet():
     """Rename wallet.dat with timestamp, delete divitxs.db. Returns dict with success, message, backup_name."""
-    # Based on rename_wallet() and remove_divitxs_db() from main.py
     divi_dir = platform_utils.get_divi_data_dir()
     wallet_path = os.path.join(divi_dir, 'wallet.dat')
 
@@ -71,10 +193,37 @@ def backup_wallet():
         "backup_name": backup_name,
     }
 
+
 def validate_seed(mnemonic_str):
     """Validate mnemonic string. Returns dict with valid, message."""
     valid, message = validate_mnemonic(mnemonic_str)
     return {"valid": valid, "message": message}
+
+
+def stop_daemon():
+    """Stop the running divid daemon via RPC."""
+    try:
+        rpc = DiviRPC.from_conf()
+    except RPCConnectionError as e:
+        return {"success": False, "message": str(e)}
+
+    try:
+        rpc.stop()
+        logger.info("Sent RPC stop command to daemon.")
+    except RPCConnectionError:
+        return {"success": True, "message": "Daemon is not running."}
+    except RPCError as e:
+        return {"success": False, "message": "RPC error: {}".format(e.message)}
+
+    # Wait for daemon to shut down
+    for _ in range(15):
+        time.sleep(2)
+        if not rpc.is_responsive():
+            logger.info("Daemon stopped successfully.")
+            return {"success": True, "message": "Daemon stopped."}
+
+    return {"success": False, "message": "Daemon did not stop within 30 seconds."}
+
 
 def start_recovery(mnemonic_str):
     """Start divid daemon with mnemonic, launch monitor thread. Returns dict with success, message."""
@@ -85,83 +234,164 @@ def start_recovery(mnemonic_str):
     except FileNotFoundError as e:
         return {"success": False, "message": str(e)}
 
+    # Step 1: Check for running daemon via RPC and stop it
+    try:
+        rpc = DiviRPC.from_conf()
+        if rpc.is_responsive():
+            logger.info("Daemon is running. Sending stop command before recovery...")
+            _set_status("running", "Stopping existing daemon...", "")
+            try:
+                rpc.stop()
+            except (RPCError, RPCConnectionError):
+                pass
+            # Wait for daemon to shut down
+            for i in range(15):
+                time.sleep(2)
+                if not rpc.is_responsive():
+                    break
+            else:
+                return {"success": False, "message": "Could not stop existing daemon within 30 seconds."}
+            logger.info("Existing daemon stopped.")
+    except RPCConnectionError:
+        pass  # No conf or daemon not running — fine
+
+    # Step 2: Launch daemon with mnemonic
     command = [daemon_path, '-mnemonic={}'.format(mnemonic_str), '-force_rescan=1']
+    logger.info("Launching daemon: %s", [daemon_path, '-mnemonic=[REDACTED]', '-force_rescan=1'])
 
     try:
         subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except Exception as e:
         return {"success": False, "message": "Failed to start daemon: {}".format(e)}
 
-    with _recovery_lock:
-        _recovery_status = {"state": "running", "message": "Daemon started. Monitoring recovery...", "progress": ""}
+    _set_status("running", "Daemon started. Waiting for RPC to become available...", "")
+
+    # Step 3: Wait for RPC to become available (daemon needs time to start)
+    logger.info("Waiting for daemon RPC to become available...")
+    rpc_ready = False
+    for _ in range(30):
+        time.sleep(2)
+        try:
+            rpc = DiviRPC.from_conf()
+            rpc.getinfo()
+            rpc_ready = True
+            break
+        except RPCError:
+            # RPC responded with an error (e.g. "Loading...") — daemon IS up
+            rpc_ready = True
+            break
+        except RPCConnectionError:
+            pass  # Not ready yet
+
+    if not rpc_ready:
+        logger.warning("Daemon RPC did not become available within 60 seconds.")
+        # Don't fail — it might just be slow. Monitor thread will handle it.
+
+    # Step 4: Check wallet.dat exists within 15s
+    divi_dir = platform_utils.get_divi_data_dir()
+    wallet_path = os.path.join(divi_dir, 'wallet.dat')
+    wallet_found = False
+    for _ in range(5):
+        if os.path.exists(wallet_path):
+            wallet_found = True
+            break
+        time.sleep(3)
+    if wallet_found:
+        logger.info("wallet.dat created at %s", wallet_path)
+    else:
+        logger.warning("wallet.dat not found after daemon start (may appear later).")
+
+    _set_status("running", "Daemon started. Monitoring recovery...", "")
 
     thread = threading.Thread(target=_monitor_recovery, daemon=True)
     thread.start()
 
     return {"success": True, "message": "Recovery started. Daemon launched."}
 
+
 def get_recovery_status():
     """Return current recovery status dict (thread-safe)."""
     with _recovery_lock:
         return dict(_recovery_status)
 
+
 def _monitor_recovery():
-    """Background thread: poll divi-cli getinfo for progress."""
-    global _recovery_status
+    """Background thread: poll divid RPC for recovery progress."""
+    # Give daemon a moment to settle
+    time.sleep(5)
 
     try:
-        cli_path = platform_utils.get_cli_path()
-    except FileNotFoundError as e:
-        with _recovery_lock:
-            _recovery_status = {"state": "error", "message": str(e), "progress": ""}
+        rpc = DiviRPC.from_conf()
+    except RPCConnectionError as e:
+        _set_status("error", "Cannot read RPC config: {}".format(e), "")
         return
+
+    consecutive_failures = 0
+    max_failures = 6  # 30 seconds of no response
 
     while True:
         try:
-            result = subprocess.run(
-                [cli_path, "getinfo"],
-                capture_output=True, text=True, check=False
-            )
-            output = result.stderr.strip() if result.stderr else result.stdout.strip()
+            info = rpc.getinfo()
+            consecutive_failures = 0
 
-            if output.startswith("error:"):
-                try:
-                    error_msg = json.loads(output.replace("error: ", ""))
-                    message = error_msg.get("message", "")
-                except (json.JSONDecodeError, ValueError):
-                    message = output
+            # Success — daemon is responding with JSON
+            blocks = info.get("blocks", 0)
+            headers = info.get("headers", 0)
 
-                if "Loading block index" in message:
-                    with _recovery_lock:
-                        _recovery_status = {"state": "running", "message": "Loading blockchain data...", "progress": "loading_blocks"}
-                elif "Loading wallet" in message:
-                    percent = ""
-                    try:
-                        percent = message.split("(")[1].split("%")[0].strip() + "%"
-                    except (IndexError, ValueError):
-                        percent = ""
-                    with _recovery_lock:
-                        _recovery_status = {"state": "running", "message": "Wallet recovery in progress... {}".format(percent), "progress": percent}
-                elif "Scanning chain for wallet updates" in message:
-                    with _recovery_lock:
-                        _recovery_status = {"state": "complete", "message": "Recovery complete. Ready to launch Divi Desktop.", "progress": "100%"}
-                    return
-                else:
-                    with _recovery_lock:
-                        _recovery_status = {"state": "running", "message": message, "progress": ""}
-            else:
-                with _recovery_lock:
-                    _recovery_status = {"state": "complete", "message": "Recovery complete. Ready to launch Divi Desktop.", "progress": "100%"}
+            if headers > 0 and blocks >= headers:
+                # Fully synced
+                logger.info("Recovery complete. Blocks: %d/%d", blocks, headers)
+                _set_status("complete", "Recovery complete. Ready to launch Divi Desktop.", "100%")
                 return
-        except Exception as e:
-            with _recovery_lock:
-                _recovery_status = {"state": "error", "message": "Monitor error: {}".format(e), "progress": ""}
-            return
+            elif headers > 0:
+                pct = "{}%".format(int(blocks / max(headers, 1) * 100))
+                _set_status("running", "Syncing... Block {}/{}".format(blocks, headers), pct)
+            else:
+                _set_status("running", "Waiting for block headers...", "")
+
+        except RPCError as e:
+            consecutive_failures = 0  # daemon IS responding, just with an error
+            message = e.message
+
+            if "Loading block index" in message:
+                _set_status("running", "Loading blockchain data...", "loading_blocks")
+            elif "Loading wallet" in message:
+                percent = ""
+                try:
+                    percent = message.split("(")[1].split("%")[0].strip() + "%"
+                except (IndexError, ValueError):
+                    percent = ""
+                _set_status("running", "Wallet recovery in progress... {}".format(percent), percent)
+            elif "Rescanning" in message or "Scanning" in message:
+                _set_status("running", "Scanning chain for wallet transactions...", "scanning")
+            elif "Verifying" in message:
+                _set_status("running", "Verifying blockchain data...", "verifying")
+            elif "Activating best chain" in message:
+                _set_status("running", "Activating best chain...", "activating")
+            else:
+                _set_status("running", message, "")
+
+        except RPCConnectionError:
+            consecutive_failures += 1
+            if consecutive_failures >= max_failures:
+                logger.error("Daemon stopped responding after %d attempts.", max_failures)
+                _set_status("error", "Daemon stopped responding.", "")
+                return
+            # Might be temporarily busy — keep trying
+            _set_status("running", "Waiting for daemon response...", "")
 
         time.sleep(5)
 
+
 def launch_desktop():
-    """Launch Divi Desktop application. Returns dict with success, message."""
+    """Launch Divi Desktop application. Stops daemon first."""
+    # Stop daemon first — Divi Desktop will start its own
+    stop_result = stop_daemon()
+    if stop_result["success"]:
+        logger.info("Daemon stopped before launching Desktop: %s", stop_result["message"])
+    else:
+        logger.warning("Could not stop daemon before launching Desktop: %s", stop_result["message"])
+
     try:
         desktop_path = platform_utils.get_divi_desktop_executable()
         platform_utils.launch_application(desktop_path)

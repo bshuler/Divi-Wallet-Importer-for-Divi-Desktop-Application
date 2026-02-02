@@ -31,15 +31,55 @@ def run_cli():
     print("Divi data dir: {}".format(info["divi_data_dir"]))
     print()
 
-    # Check prerequisites
-    if not _ask_yes_no("Do you have Divi Desktop installed?"):
+    # Auto-detect prerequisites
+    print("Checking prerequisites...")
+    prereqs = api.check_prerequisites()
+    print()
+
+    if prereqs["desktop_installed"]:
+        print("  [OK] Divi Desktop found: {}".format(prereqs["desktop_path"]))
+    else:
+        print("  [!!] Divi Desktop not found at: {}".format(prereqs["desktop_path"]))
         print("\nPlease install Divi Desktop first:")
         print("  https://diviproject.org/downloads")
         return
 
-    if not _ask_yes_no("Is Divi Desktop fully synced?"):
-        print("\nPlease sync Divi Desktop before attempting recovery.")
+    if prereqs["daemon_found"]:
+        print("  [OK] Divi daemon found: {}".format(prereqs["daemon_path"]))
+    else:
+        print("  [!!] Divi daemon not found: {}".format(prereqs["daemon_path"]))
+        print("\nSet DIVI_DAEMON_PATH environment variable to the full path of your divid binary.")
         return
+
+    if prereqs["daemon_running"]:
+        msg = "  [**] Divi daemon is currently running"
+        if prereqs["daemon_pid"]:
+            msg += " (PID {})".format(prereqs["daemon_pid"])
+        if prereqs["rpc_port_open"]:
+            msg += " - RPC port 51473 open"
+        print(msg)
+        if _ask_yes_no("       Stop the daemon before continuing?"):
+            print("       Stopping daemon via RPC...")
+            result = api.stop_daemon()
+            if result["success"]:
+                print("       {}".format(result["message"]))
+            else:
+                print("       Warning: {}".format(result["message"]))
+        else:
+            print("       Continuing with daemon running.")
+
+    if prereqs["blockchain_synced"]:
+        print("  [OK] Blockchain data found (synced)")
+    else:
+        if prereqs["data_dir_exists"]:
+            print("  [!!] Blockchain not fully synced (missing blocks or chainstate)")
+        else:
+            print("  [!!] Divi data directory not found: {}".format(prereqs["divi_data_dir"]))
+        print("\nPlease sync Divi Desktop fully before attempting recovery.")
+        if not _ask_yes_no("Continue anyway?"):
+            return
+
+    print()
 
     # Check wallet
     wallet = api.check_wallet()
