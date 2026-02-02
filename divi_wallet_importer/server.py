@@ -106,6 +106,8 @@ class _RequestHandler(BaseHTTPRequestHandler):
             self._send_json(api.check_wallet())
         elif self.path == "/api/recovery/status":
             self._send_json(api.get_recovery_status())
+        elif self.path == "/api/recovery/check":
+            self._send_json(api.check_recovery_in_progress())
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -123,6 +125,14 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
         if self.path == "/api/daemon/stop":
             self._send_json(api.stop_daemon())
+            return
+
+        if self.path == "/api/recovery/resume":
+            self._send_json(api.resume_monitoring())
+            return
+
+        if self.path == "/api/recovery/clear":
+            self._send_json(api.clear_recovery())
             return
 
         if self.path == "/api/wallet/backup":

@@ -73,13 +73,80 @@ _setup_logging()
 # ---------------------------------------------------------------------------
 
 _recovery_lock = threading.Lock()
-_recovery_status = {"state": "idle", "message": "", "progress": ""}
+_recovery_status = {"state": "idle", "phase": "", "message": "", "progress": ""}
+_recovery_start_time = None
+_auto_launched = False
 
 
-def _set_status(state, message, progress=""):
+def _set_status(state, message, progress="", phase=""):
     global _recovery_status
     with _recovery_lock:
-        _recovery_status = {"state": state, "message": message, "progress": progress}
+        _recovery_status = {
+            "state": state,
+            "phase": phase,
+            "message": message,
+            "progress": progress,
+        }
+    if phase:
+        _save_state(phase)
+
+
+def _get_state_path():
+    """Path to persistent recovery state file."""
+    divi_dir = platform_utils.get_divi_data_dir()
+    return os.path.join(divi_dir, 'importer_state.json')
+
+
+def _save_state(phase, extra=None):
+    """Persist recovery state to disk for resume detection."""
+    state = {
+        "start_time": _recovery_start_time,
+        "phase": phase,
+        "timestamp": time.time(),
+    }
+    if extra:
+        state.update(extra)
+    try:
+        path = _get_state_path()
+        with open(path, 'w') as f:
+            json.dump(state, f)
+    except OSError:
+        pass
+
+
+def _load_state():
+    """Load persisted recovery state. Returns dict or None."""
+    try:
+        path = _get_state_path()
+        with open(path, 'r') as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _clear_state():
+    """Delete persisted recovery state."""
+    try:
+        path = _get_state_path()
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _auto_launch_desktop():
+    """Auto-launch Divi Desktop when wallet recovery enters scanning phase."""
+    global _auto_launched
+    _auto_launched = True
+    logger.info("Wallet recovered. Auto-launching Divi Desktop to handle remaining sync.")
+    try:
+        desktop_path = platform_utils.get_divi_desktop_executable()
+        platform_utils.launch_application(desktop_path)
+        _set_status("launched", "Divi Desktop launched. It will finish syncing your wallet automatically.", "", "launched")
+        _clear_state()
+    except Exception as e:
+        logger.warning("Could not auto-launch Desktop: %s", e)
+        # Don't change status — user can still launch manually
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +267,111 @@ def validate_seed(mnemonic_str):
     return {"valid": valid, "message": message}
 
 
+def check_recovery_in_progress():
+    """Check if a recovery is currently in progress (daemon running in recovery mode).
+
+    Returns dict with:
+        in_progress: bool
+        phase: str - current phase if in progress
+        elapsed: int - seconds since recovery started
+        message: str - human-readable status
+    """
+    # First check if we're actively monitoring (same process)
+    with _recovery_lock:
+        if _recovery_status["state"] == "running":
+            elapsed = int(time.time() - _recovery_start_time) if _recovery_start_time else 0
+            return {
+                "in_progress": True,
+                "phase": _recovery_status["phase"],
+                "elapsed": elapsed,
+                "message": _recovery_status["message"],
+            }
+
+    # Check persisted state from a previous run
+    saved = _load_state()
+    if not saved:
+        return {"in_progress": False, "phase": "", "elapsed": 0, "message": ""}
+
+    # State file exists — check if daemon is actually still running
+    try:
+        rpc = DiviRPC.from_conf()
+        rpc.getinfo()
+        # Daemon is up and responding normally — may be done
+        phase = saved.get("phase", "")
+        if phase in ("complete", "error", ""):
+            _clear_state()
+            return {"in_progress": False, "phase": "", "elapsed": 0, "message": ""}
+        # Still in a recovery phase
+        start = saved.get("start_time", time.time())
+        return {
+            "in_progress": True,
+            "phase": phase,
+            "elapsed": int(time.time() - start),
+            "message": "Recovery in progress (resumed).",
+        }
+    except RPCError as e:
+        # Daemon is responding with error — still loading/scanning
+        message = e.message
+        phase = ""
+        if "Loading block index" in message:
+            phase = "loading_blocks"
+        elif "Loading wallet" in message:
+            phase = "recovering_wallet"
+        elif "Rescanning" in message or "Scanning" in message:
+            phase = "scanning"
+        elif "Verifying" in message:
+            phase = "verifying"
+        else:
+            phase = saved.get("phase", "")
+        start = saved.get("start_time", time.time())
+        return {
+            "in_progress": True,
+            "phase": phase,
+            "elapsed": int(time.time() - start),
+            "message": message,
+        }
+    except RPCConnectionError:
+        # Daemon not running — recovery ended (crashed or completed)
+        _clear_state()
+        return {"in_progress": False, "phase": "", "elapsed": 0, "message": ""}
+
+
+def resume_monitoring():
+    """Resume monitoring an in-progress recovery (e.g. after tool restart).
+
+    Returns dict with success, message.
+    """
+    global _recovery_start_time
+
+    status = check_recovery_in_progress()
+    if not status["in_progress"]:
+        return {"success": False, "message": "No recovery in progress."}
+
+    # Restore start time from saved state
+    saved = _load_state()
+    if saved and saved.get("start_time"):
+        _recovery_start_time = saved["start_time"]
+    else:
+        _recovery_start_time = time.time()
+
+    _set_status("running", status["message"], "", status["phase"])
+
+    thread = threading.Thread(target=_monitor_recovery, daemon=True)
+    thread.start()
+
+    return {"success": True, "message": "Resumed monitoring recovery."}
+
+
+def clear_recovery():
+    """Clear recovery state and optionally stop daemon. For starting over."""
+    _clear_state()
+    global _recovery_status, _recovery_start_time
+    with _recovery_lock:
+        _recovery_status = {"state": "idle", "phase": "", "message": "", "progress": ""}
+    _recovery_start_time = None
+    return {"success": True, "message": "Recovery state cleared."}
+
+
 def stop_daemon():
     """Stop the running divid daemon via RPC."""
     try:
@@ -228,6 +400,8 @@ def stop_daemon():
 def start_recovery(mnemonic_str):
     """Start divid daemon with mnemonic, launch monitor thread. Returns dict with success, message."""
     global _recovery_status
+    global _auto_launched
+    _auto_launched = False
 
     try:
         daemon_path = platform_utils.get_daemon_path()
@@ -239,7 +413,7 @@ def start_recovery(mnemonic_str):
         rpc = DiviRPC.from_conf()
         if rpc.is_responsive():
             logger.info("Daemon is running. Sending stop command before recovery...")
-            _set_status("running", "Stopping existing daemon...", "")
+            _set_status("running", "Stopping existing daemon...", "", "stopping")
             try:
                 rpc.stop()
             except (RPCError, RPCConnectionError):
@@ -264,7 +438,9 @@ def start_recovery(mnemonic_str):
     except Exception as e:
         return {"success": False, "message": "Failed to start daemon: {}".format(e)}
 
-    _set_status("running", "Daemon started. Waiting for RPC to become available...", "")
+    global _recovery_start_time
+    _recovery_start_time = time.time()
+    _set_status("running", "Daemon started. Waiting for RPC to become available...", "", "starting")
 
     # Step 3: Wait for RPC to become available (daemon needs time to start)
     logger.info("Waiting for daemon RPC to become available...")
@@ -301,7 +477,7 @@ def start_recovery(mnemonic_str):
     else:
         logger.warning("wallet.dat not found after daemon start (may appear later).")
 
-    _set_status("running", "Daemon started. Monitoring recovery...", "")
+    _set_status("running", "Daemon started. Monitoring recovery...", "", "starting")
 
     thread = threading.Thread(target=_monitor_recovery, daemon=True)
     thread.start()
@@ -312,7 +488,12 @@ def start_recovery(mnemonic_str):
 def get_recovery_status():
     """Return current recovery status dict (thread-safe)."""
     with _recovery_lock:
-        return dict(_recovery_status)
+        status = dict(_recovery_status)
+    if _recovery_start_time and status["state"] in ("running", "launched"):
+        status["elapsed"] = int(time.time() - _recovery_start_time)
+    else:
+        status["elapsed"] = 0
+    return status
 
 
 def _monitor_recovery():
@@ -341,60 +522,58 @@ def _monitor_recovery():
             if headers > 0 and blocks >= headers:
                 # Fully synced
                 logger.info("Recovery complete. Blocks: %d/%d", blocks, headers)
-                _set_status("complete", "Recovery complete. Ready to launch Divi Desktop.", "100%")
+                _set_status("complete", "Recovery complete. Ready to launch Divi Desktop.", "100%", "complete")
+                _clear_state()
                 return
             elif headers > 0:
                 pct = "{}%".format(int(blocks / max(headers, 1) * 100))
-                _set_status("running", "Syncing... Block {}/{}".format(blocks, headers), pct)
+                _set_status("running", "Block {}/{}".format(blocks, headers), pct, "syncing")
             else:
-                _set_status("running", "Waiting for block headers...", "")
+                _set_status("running", "Waiting for block headers...", "", "syncing")
 
         except RPCError as e:
             consecutive_failures = 0  # daemon IS responding, just with an error
             message = e.message
 
             if "Loading block index" in message:
-                _set_status("running", "Loading blockchain data...", "loading_blocks")
+                _set_status("running", "Loading blockchain index...", "", "loading_blocks")
             elif "Loading wallet" in message:
                 percent = ""
                 try:
                     percent = message.split("(")[1].split("%")[0].strip() + "%"
                 except (IndexError, ValueError):
                     percent = ""
-                _set_status("running", "Wallet recovery in progress... {}".format(percent), percent)
+                _set_status("running", "Recreating wallet from seed phrase... {}".format(percent), percent, "recovering_wallet")
             elif "Rescanning" in message or "Scanning" in message:
-                _set_status("running", "Scanning chain for wallet transactions...", "scanning")
+                _set_status("running", "Scanning blockchain for your transactions...", "", "scanning")
+                if not _auto_launched:
+                    _auto_launch_desktop()
             elif "Verifying" in message:
-                _set_status("running", "Verifying blockchain data...", "verifying")
+                _set_status("running", "Verifying blockchain data...", "", "verifying")
             elif "Activating best chain" in message:
-                _set_status("running", "Activating best chain...", "activating")
+                _set_status("running", "Activating best chain...", "", "loading_blocks")
             else:
-                _set_status("running", message, "")
+                _set_status("running", message, "", "")
 
         except RPCConnectionError:
             consecutive_failures += 1
             if consecutive_failures >= max_failures:
                 logger.error("Daemon stopped responding after %d attempts.", max_failures)
-                _set_status("error", "Daemon stopped responding.", "")
+                _set_status("error", "Daemon stopped responding.", "", "error")
                 return
             # Might be temporarily busy — keep trying
-            _set_status("running", "Waiting for daemon response...", "")
+            _set_status("running", "Waiting for daemon response...", "", "starting")
 
         time.sleep(5)
 
 
 def launch_desktop():
-    """Launch Divi Desktop application. Stops daemon first."""
-    # Stop daemon first — Divi Desktop will start its own
-    stop_result = stop_daemon()
-    if stop_result["success"]:
-        logger.info("Daemon stopped before launching Desktop: %s", stop_result["message"])
-    else:
-        logger.warning("Could not stop daemon before launching Desktop: %s", stop_result["message"])
-
+    """Launch Divi Desktop application."""
     try:
         desktop_path = platform_utils.get_divi_desktop_executable()
         platform_utils.launch_application(desktop_path)
+        _clear_state()
+        logger.info("Divi Desktop launched.")
         return {"success": True, "message": "Divi Desktop launched."}
     except Exception as e:
         return {"success": False, "message": "Could not launch Divi Desktop: {}".format(e)}

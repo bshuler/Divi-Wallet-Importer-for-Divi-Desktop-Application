@@ -25,6 +25,53 @@ def run_cli():
     print("=" * 60)
     print()
 
+    # Check for in-progress recovery
+    recovery = api.check_recovery_in_progress()
+    if recovery["in_progress"]:
+        elapsed = recovery["elapsed"]
+        m = elapsed // 60
+        s = elapsed % 60
+        print("  A recovery is already in progress.")
+        print("  Phase: {}".format(recovery["phase"]))
+        print("  Elapsed: {}m {}s".format(m, s))
+        print("  Status: {}".format(recovery["message"]))
+        print()
+        choice = input("  [R]esume monitoring, [L]aunch Divi Desktop, or [C]lear and start over? ").strip().lower()
+        if choice in ("r", "resume"):
+            result = api.resume_monitoring()
+            if result["success"]:
+                print("\n  Resumed. Monitoring recovery progress (Ctrl+C to stop)...\n")
+                try:
+                    while True:
+                        status = api.get_recovery_status()
+                        line = "  [{}] {}".format(status["phase"] or status["state"], status["message"])
+                        if status["progress"]:
+                            line += " ({})".format(status["progress"])
+                        print("\r" + line.ljust(80), end="", flush=True)
+                        if status["state"] in ("complete", "launched", "error"):
+                            print()
+                            break
+                        time.sleep(5)
+                except KeyboardInterrupt:
+                    print("\n\n  Monitoring stopped. Recovery continues in background.")
+                if status["state"] == "launched":
+                    print("\n  Divi Desktop has been launched. It will finish syncing automatically.")
+                return
+            else:
+                print("  {}".format(result["message"]))
+        elif choice in ("l", "launch"):
+            result = api.launch_desktop()
+            print("  {}".format(result["message"]))
+            print("  Divi Desktop will synchronize and complete the wallet conversion.")
+            return
+        elif choice in ("c", "clear"):
+            result = api.clear_recovery()
+            print("  {}".format(result["message"]))
+            print()
+        else:
+            print("  Unrecognized choice. Starting fresh.\n")
+            api.clear_recovery()
+
     # Platform info
     info = api.get_platform_info()
     print("Platform: {}".format(info["platform"]))
@@ -130,20 +177,31 @@ def run_cli():
     try:
         while True:
             status = api.get_recovery_status()
-            print("\r  [{}] {}".format(status["state"], status["message"]), end="", flush=True)
+            line = "  [{}] {}".format(status["phase"] or status["state"], status["message"])
+            if status["progress"]:
+                line += " ({})".format(status["progress"])
+            print("\r" + line.ljust(80), end="", flush=True)
 
             if status["state"] in ("complete", "error"):
                 print()
                 break
+            if status["state"] == "launched":
+                print()
+                print("\n  Divi Desktop has been launched.")
+                print("  It will synchronize and complete the wallet conversion automatically.")
+                print("  You can close this tool now.")
+                break
 
             time.sleep(5)
     except KeyboardInterrupt:
-        print("\n\nMonitoring stopped. Recovery may still be in progress.")
+        print("\n\nMonitoring stopped. Recovery continues in background.")
+        print("Run this tool again to resume monitoring or launch Divi Desktop.")
         return
 
     if status["state"] == "complete":
         if _ask_yes_no("\nLaunch Divi Desktop?"):
             result = api.launch_desktop()
             print(result["message"])
+            print("Divi Desktop will synchronize and complete the wallet conversion.")
 
     print("\nDone.")
