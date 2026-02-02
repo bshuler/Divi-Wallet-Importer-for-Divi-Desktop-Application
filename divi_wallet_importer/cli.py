@@ -23,7 +23,18 @@ def main():
         action="store_true",
         help="Don't auto-open the browser",
     )
+    parser.add_argument(
+        "--clear",
+        action="store_true",
+        help="Clear any in-progress recovery state and start fresh",
+    )
     args = parser.parse_args()
+
+    if args.clear:
+        from divi_wallet_importer.api import clear_recovery
+        result = clear_recovery()
+        print(result["message"])
+        return
 
     if args.cli:
         from divi_wallet_importer.cli_mode import run_cli

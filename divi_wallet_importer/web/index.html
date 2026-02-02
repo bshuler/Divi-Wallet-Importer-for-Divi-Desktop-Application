@@ -262,6 +262,87 @@
             max-height: 200px;
             overflow-y: auto;
         }
+        .phase-display { margin: 16px 0; }
+        .phase-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .phase-title { font-size: 1.1em; font-weight: 600; }
+        .phase-elapsed { color: #6c7086; font-size: 0.85em; }
+        .phase-steps {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 16px;
+        }
+        .phase-step {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: #30363d;
+            transition: background 0.5s;
+        }
+        .phase-step.done { background: #3fb950; }
+        .phase-step.active { background: #EC2C1C; animation: pulse-bar 1.5s ease-in-out infinite; }
+        @keyframes pulse-bar { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .phase-desc {
+            color: #a0a0b0;
+            font-size: 0.9em;
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }
+        .phase-progress-bar {
+            background: #30363d;
+            border-radius: 6px;
+            height: 8px;
+            overflow: hidden;
+            margin: 12px 0;
+        }
+        .phase-progress-fill {
+            height: 100%;
+            border-radius: 6px;
+            background: linear-gradient(90deg, #EC2C1C, #EC1C62);
+            transition: width 0.5s ease;
+        }
+        .phase-ready-banner {
+            background: #0d2818;
+            border: 1px solid #238636;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+            display: none;
+        }
+        .phase-ready-banner.show { display: block; }
+        .phase-ready-banner h4 { color: #3fb950; margin-bottom: 8px; }
+        .phase-ready-banner p { color: #a0a0b0; font-size: 0.9em; line-height: 1.5; margin-bottom: 12px; }
+        .details-toggle {
+            background: none;
+            border: 1px solid #30363d;
+            color: #6c7086;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.8em;
+            padding: 6px 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+        }
+        .details-toggle:hover { color: #a0a0b0; border-color: #58a6ff; }
+        .details-section { display: none; margin-top: 12px; }
+        .details-section.show { display: block; }
+        .launched-banner {
+            background: #0d2818;
+            border: 1px solid #238636;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            margin: 16px 0;
+            display: none;
+        }
+        .launched-banner.show { display: block; }
+        .launched-banner h3 { color: #3fb950; margin-bottom: 12px; font-size: 1.2em; }
+        .launched-banner p { color: #a0a0b0; font-size: 0.95em; line-height: 1.6; margin-bottom: 8px; }
+        .launched-banner .highlight { color: #e0e0e0; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -326,10 +407,7 @@
         <!-- STEP 2: Mnemonic entry -->
         <div class="step-section" id="step2">
             <div class="card">
-                <p class="grid-label">Enter your 12-word mnemonic seed phrase (lowercase):</p>
-                <div class="important-note">
-                    Seed words from Divi Wallet are displayed in UPPERCASE, but you must enter them in <strong>lowercase</strong> for validation.
-                </div>
+                <p class="grid-label">Enter your 12-word mnemonic seed phrase:</p>
                 <div class="word-grid" id="wordGrid"></div>
                 <div class="spinner" id="validationSpinner">
                     <div class="spinner-icon"></div>
@@ -343,15 +421,68 @@
         <div class="step-section" id="step3">
             <div class="card">
                 <div class="recovery-section">
-                    <h3>Recovery in Progress</h3>
-                    <div class="important-note">Do not close this window or Divi Desktop while recovery is running.</div>
-                    <div class="progress-log" id="progressLog">Starting recovery...</div>
+                    <h3 id="recoveryHeading">Recovery in Progress</h3>
+
+                    <div class="phase-display">
+                        <!-- Phase step indicator -->
+                        <div class="phase-steps" id="phaseSteps">
+                            <div class="phase-step active" data-phase="loading_blocks"></div>
+                            <div class="phase-step" data-phase="recovering_wallet"></div>
+                            <div class="phase-step" data-phase="scanning"></div>
+                            <div class="phase-step" data-phase="syncing"></div>
+                        </div>
+
+                        <div class="phase-header">
+                            <span class="phase-title" id="phaseTitle">Starting daemon...</span>
+                            <span class="phase-elapsed" id="phaseElapsed"></span>
+                        </div>
+
+                        <!-- Progress bar (shown when percentage available) -->
+                        <div class="phase-progress-bar" id="phaseProgressBar" style="display:none;">
+                            <div class="phase-progress-fill" id="phaseProgressFill" style="width:0%"></div>
+                        </div>
+
+                        <p class="phase-desc" id="phaseDesc">The Divi daemon is starting up.</p>
+                    </div>
+
                     <div class="spinner show" id="recoverySpinner"><div class="spinner-icon"></div></div>
+
+                    <!-- Banner shown when scanning begins — user can launch Desktop -->
+                    <div class="phase-ready-banner" id="readyBanner">
+                        <h4>Wallet recovered successfully</h4>
+                        <p>Your wallet has been recreated from your seed phrase. The daemon is now scanning the
+                           blockchain for past transactions &mdash; this can take 10&ndash;30 minutes. You don't need
+                           to wait here. <strong>Divi Desktop will continue the scan automatically.</strong></p>
+                        <div class="btn-group" style="justify-content:flex-start;">
+                            <button class="btn btn-primary" onclick="onLaunchDesktop()">Launch Divi Desktop</button>
+                            <button class="btn btn-outline" onclick="goToStep(4)">View Post-Recovery Checklist</button>
+                        </div>
+                    </div>
+
+                    <!-- Shown when Desktop is auto-launched -->
+                    <div class="launched-banner" id="launchedBanner">
+                        <h3>Divi Desktop Launched</h3>
+                        <p class="highlight">Divi Desktop is now running and will finish syncing your wallet automatically.</p>
+                        <p>When fully synchronized, your wallet conversion will be complete.
+                           You can safely close this tool.</p>
+                        <div class="btn-group" style="margin-top:16px;">
+                            <button class="btn btn-outline" onclick="goToStep(4)">View Post-Recovery Checklist</button>
+                            <button class="btn btn-outline" onclick="onClose()">Close Importer</button>
+                        </div>
+                    </div>
+
+                    <!-- Final actions (shown on complete) -->
                     <div id="recoveryActions" style="display:none;">
                         <div class="btn-group">
                             <button class="btn btn-primary" onclick="onLaunchDesktop()">Launch Divi Desktop</button>
                             <button class="btn btn-outline" onclick="goToStep(4)">Continue to Post-Recovery</button>
                         </div>
+                    </div>
+
+                    <!-- Expandable details log -->
+                    <button class="details-toggle" id="detailsToggle" onclick="toggleDetails()">Show Details</button>
+                    <div class="details-section" id="detailsSection">
+                        <div class="progress-log" id="progressLog">Starting recovery...</div>
                     </div>
                 </div>
             </div>
@@ -733,33 +864,135 @@
                 showStatus('Validation error: ' + e.message, 'error');
                 btn.disabled = false;
                 btn.style.display = 'block';
+            }).finally(function() {
+                words = null;
             });
-            words = null;
         }, 500);
     }
 
-    // Step 3: Recovery polling
+    // Phase metadata
+    var PHASES = {
+        starting:          { order: 0, title: 'Starting daemon',         desc: 'The Divi daemon is starting up. This usually takes a few seconds.' },
+        stopping:          { order: 0, title: 'Stopping daemon',         desc: 'Stopping a previously running daemon before starting recovery.' },
+        loading_blocks:    { order: 1, title: 'Loading blockchain',      desc: 'The daemon is loading the blockchain index into memory. This typically takes 1\u20133 minutes depending on your hardware.' },
+        verifying:         { order: 1, title: 'Verifying blockchain',    desc: 'The daemon is verifying the integrity of the blockchain data.' },
+        recovering_wallet: { order: 2, title: 'Recovering wallet',       desc: 'Your wallet is being recreated from your seed phrase. This typically takes 2\u20135 minutes.' },
+        scanning:          { order: 3, title: 'Scanning transactions',   desc: 'The daemon is scanning the blockchain for transactions belonging to your wallet. This can take 10\u201330 minutes. You can launch Divi Desktop now \u2014 it will continue automatically.' },
+        syncing:           { order: 4, title: 'Syncing blocks',          desc: 'Catching up to the latest blocks on the network.' },
+        complete:          { order: 5, title: 'Complete',                 desc: 'Recovery is complete. Your wallet is ready.' }
+    };
+    var PHASE_KEYS = ['loading_blocks', 'recovering_wallet', 'scanning', 'syncing'];
+    var lastPhase = '';
+    var readyShown = false;
+
+    function formatElapsed(seconds) {
+        if (seconds < 60) return seconds + 's';
+        var m = Math.floor(seconds / 60);
+        var s = seconds % 60;
+        return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+    }
+
+    function updatePhaseSteps(phase) {
+        var info = PHASES[phase];
+        if (!info) return;
+        var order = info.order;
+        document.querySelectorAll('.phase-step').forEach(function(el, i) {
+            var stepOrder = i + 1; // phase-steps are 1-4 matching loading_blocks(1) through syncing(4)
+            if (stepOrder < order) el.className = 'phase-step done';
+            else if (stepOrder === order) el.className = 'phase-step active';
+            else el.className = 'phase-step';
+        });
+    }
+
     function startPolling() {
         var log = document.getElementById('progressLog');
-        log.textContent = 'Recovery started...\n';
+        log.textContent = '';
+        lastPhase = '';
+        readyShown = false;
+        document.getElementById('readyBanner').className = 'phase-ready-banner';
+        document.getElementById('recoveryActions').style.display = 'none';
 
         pollTimer = setInterval(function() {
             apiGet('/api/recovery/status').then(function(data) {
-                var line = '[' + data.state + '] ' + data.message;
-                if (data.progress && data.progress !== 'loading_blocks' && data.progress !== 'scanning' && data.progress !== 'verifying' && data.progress !== 'activating') {
-                    line += ' (' + data.progress + ')';
-                }
-                log.textContent += line + '\n';
-                log.scrollTop = log.scrollHeight;
+                var phase = data.phase || '';
+                var info = PHASES[phase] || {};
 
+                // Update elapsed time
+                if (data.elapsed) {
+                    document.getElementById('phaseElapsed').textContent = formatElapsed(data.elapsed) + ' elapsed';
+                }
+
+                // Update phase display when phase changes
+                if (phase && phase !== lastPhase) {
+                    document.getElementById('phaseTitle').textContent = info.title || phase;
+                    document.getElementById('phaseDesc').textContent = info.desc || '';
+                    updatePhaseSteps(phase);
+
+                    // Log phase transition
+                    var ts = data.elapsed ? '[' + formatElapsed(data.elapsed) + '] ' : '';
+                    log.textContent += ts + (info.title || phase) + '\n';
+                    log.scrollTop = log.scrollHeight;
+                    lastPhase = phase;
+                }
+
+                // Update progress bar
+                var pctNum = parseFloat(data.progress);
+                var progressBar = document.getElementById('phaseProgressBar');
+                if (!isNaN(pctNum) && pctNum > 0) {
+                    progressBar.style.display = 'block';
+                    document.getElementById('phaseProgressFill').style.width = Math.min(pctNum, 100) + '%';
+                    document.getElementById('phaseTitle').textContent = (info.title || phase) + ' \u2014 ' + data.progress;
+                } else {
+                    progressBar.style.display = 'none';
+                }
+
+                // Log detailed messages (deduped — only when message changes from a raw RPC message)
+                if (data.message && data.progress && !isNaN(pctNum)) {
+                    var ts2 = data.elapsed ? '[' + formatElapsed(data.elapsed) + '] ' : '';
+                    log.textContent += ts2 + data.message + '\n';
+                    log.scrollTop = log.scrollHeight;
+                }
+
+                // Show "ready" banner once scanning begins
+                if (!readyShown && (phase === 'scanning' || phase === 'syncing')) {
+                    readyShown = true;
+                    document.getElementById('readyBanner').className = 'phase-ready-banner show';
+                }
+
+                // Auto-launched Desktop
+                if (data.state === 'launched') {
+                    stopPolling();
+                    document.getElementById('recoverySpinner').className = 'spinner';
+                    document.getElementById('recoveryHeading').textContent = 'Divi Desktop Launched';
+                    document.getElementById('readyBanner').className = 'phase-ready-banner';
+                    document.getElementById('launchedBanner').className = 'launched-banner show';
+                    updatePhaseSteps('complete');
+                    var tsL = data.elapsed ? '[' + formatElapsed(data.elapsed) + '] ' : '';
+                    log.textContent += tsL + 'Divi Desktop launched. It will complete the sync.\n';
+                    return;
+                }
+
+                // Terminal states
                 if (data.state === 'complete') {
                     stopPolling();
                     document.getElementById('recoverySpinner').className = 'spinner';
+                    document.getElementById('recoveryHeading').textContent = 'Recovery Complete';
+                    document.getElementById('phaseTitle').textContent = 'Complete';
+                    document.getElementById('phaseDesc').textContent = 'Your wallet has been fully recovered and synced.';
+                    document.getElementById('phaseProgressBar').style.display = 'block';
+                    document.getElementById('phaseProgressFill').style.width = '100%';
+                    document.getElementById('readyBanner').className = 'phase-ready-banner';
                     document.getElementById('recoveryActions').style.display = 'block';
+                    updatePhaseSteps('complete');
+                    var ts3 = data.elapsed ? '[' + formatElapsed(data.elapsed) + '] ' : '';
+                    log.textContent += ts3 + 'Recovery complete.\n';
                     showStatus('Recovery complete!', 'success');
                 } else if (data.state === 'error') {
                     stopPolling();
                     document.getElementById('recoverySpinner').className = 'spinner';
+                    document.getElementById('recoveryHeading').textContent = 'Recovery Error';
+                    document.getElementById('phaseTitle').textContent = 'Error';
+                    document.getElementById('phaseDesc').textContent = data.message;
                     showStatus('Recovery error: ' + data.message, 'error');
                 }
             }).catch(function() {
@@ -772,6 +1005,21 @@
         if (pollTimer) {
             clearInterval(pollTimer);
             pollTimer = null;
+        }
+    }
+
+    function toggleDetails() {
+        var section = document.getElementById('detailsSection');
+        var btn = document.getElementById('detailsToggle');
+        if (section.className.indexOf('show') !== -1) {
+            section.className = 'details-section';
+            btn.textContent = 'Show Details';
+        } else {
+            section.className = 'details-section show';
+            btn.textContent = 'Hide Details';
+            // Scroll log to bottom
+            var log = document.getElementById('progressLog');
+            log.scrollTop = log.scrollHeight;
         }
     }
 
@@ -793,7 +1041,12 @@
     function onLaunchDesktop() {
         apiPost('/api/launch-desktop').then(function(data) {
             if (data.success) {
-                showStatus('Divi Desktop launched.', 'success', true);
+                stopPolling();
+                document.getElementById('recoverySpinner').className = 'spinner';
+                document.getElementById('recoveryHeading').textContent = 'Divi Desktop Launched';
+                document.getElementById('readyBanner').className = 'phase-ready-banner';
+                document.getElementById('recoveryActions').style.display = 'none';
+                document.getElementById('launchedBanner').className = 'launched-banner show';
             } else {
                 showStatus(data.message, 'error');
             }
@@ -864,6 +1117,19 @@
 
         // Auto-detect prerequisites on page load
         checkPrerequisites();
+
+        // Check for in-progress recovery
+        apiGet('/api/recovery/check').then(function(data) {
+            if (data.in_progress) {
+                // Resume monitoring — jump to step 3
+                apiPost('/api/recovery/resume').then(function(result) {
+                    if (result.success) {
+                        goToStep(3);
+                        startPolling();
+                    }
+                });
+            }
+        }).catch(function() {});
     })();
 
     // Enter key triggers validation on step 2
