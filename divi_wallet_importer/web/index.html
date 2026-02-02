@@ -304,47 +304,12 @@
                 </div>
             </div>
             <div class="card">
-                <p class="question-text">Do you have <strong>Divi Desktop Application</strong> installed?</p>
-                <div class="btn-group">
-                    <button class="btn btn-secondary" onclick="onDiviInstalled(true)">Yes</button>
-                    <button class="btn btn-secondary" onclick="onDiviInstalled(false)">No</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- STEP 0b: Not installed -->
-        <div class="step-section" id="step0b">
-            <div class="card">
-                <p class="question-text">You need to install Divi Desktop first.</p>
-                <p class="question-sub">Download it from the official website, install it, and allow it to fully sync with the blockchain before continuing.</p>
-                <div class="btn-group">
-                    <a href="https://diviproject.org/downloads" target="_blank" rel="noopener" class="btn btn-primary">Download Divi Desktop</a>
-                </div>
-                <div class="btn-group">
-                    <button class="btn btn-outline" onclick="goToStep(0)">Go Back</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- STEP 0c: Synced check -->
-        <div class="step-section" id="step0c">
-            <div class="card">
-                <p class="question-text">Is your Divi Desktop Application <strong>fully synced</strong>?</p>
-                <p class="question-sub">The blockchain must be fully synced before attempting wallet recovery.</p>
-                <div class="btn-group">
-                    <button class="btn btn-secondary" onclick="onDiviSynced(true)">Yes, it&rsquo;s synced</button>
-                    <button class="btn btn-secondary" onclick="onDiviSynced(false)">No, not yet</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- STEP 0d: Not synced -->
-        <div class="step-section" id="step0d">
-            <div class="card">
-                <p class="question-text">Please sync your Divi Desktop and try again.</p>
-                <p class="question-sub">Open Divi Desktop and wait for the blockchain to fully synchronize. This may take some time on first run.</p>
-                <div class="btn-group">
-                    <button class="btn btn-outline" onclick="goToStep(0)">Start Over</button>
+                <p class="question-text">System Prerequisites</p>
+                <p class="question-sub">Checking your system for Divi Desktop and blockchain data...</p>
+                <div class="spinner show" id="prereqSpinner"><div class="spinner-icon"></div></div>
+                <div id="prereqResults" style="display:none;">
+                    <div id="prereqList" style="margin: 16px 0;"></div>
+                    <div class="btn-group" id="prereqActions"></div>
                 </div>
             </div>
         </div>
@@ -507,21 +472,101 @@
         if (statusTimeout) { clearTimeout(statusTimeout); statusTimeout = null; }
     }
 
-    // Step 0: Prerequisites
-    function onDiviInstalled(yes) {
-        if (yes) {
-            showSection('step0c');
-        } else {
-            showSection('step0b');
-        }
-    }
+    // Step 0: Prerequisites auto-detection
+    function checkPrerequisites() {
+        var spinner = document.getElementById('prereqSpinner');
+        var results = document.getElementById('prereqResults');
+        var list = document.getElementById('prereqList');
+        var actions = document.getElementById('prereqActions');
 
-    function onDiviSynced(yes) {
-        if (yes) {
-            goToStep(1);
-        } else {
-            showSection('step0d');
-        }
+        spinner.className = 'spinner show';
+        results.style.display = 'none';
+
+        apiGet('/api/prerequisites').then(function(data) {
+            spinner.className = 'spinner';
+            results.style.display = 'block';
+
+            var html = '';
+            var allGood = true;
+
+            // Divi Desktop
+            if (data.desktop_installed) {
+                html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
+                    '<span style="color:#3fb950;">&#10003;</span>' +
+                    '<span>Divi Desktop: Installed at <code>' + data.desktop_path + '</code></span></div>';
+            } else {
+                allGood = false;
+                html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
+                    '<span style="color:#f85149;">&#10007;</span>' +
+                    '<span>Divi Desktop: Not found</span></div>';
+            }
+
+            // Divi Daemon
+            if (data.daemon_found) {
+                html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
+                    '<span style="color:#3fb950;">&#10003;</span>' +
+                    '<span>Divi Daemon: Found at <code>' + data.daemon_path + '</code></span></div>';
+            } else {
+                allGood = false;
+                html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
+                    '<span style="color:#f85149;">&#10007;</span>' +
+                    '<span>Divi Daemon: Not found</span></div>';
+            }
+
+            // Daemon running status
+            if (data.daemon_running) {
+                var runMsg = 'Divi Daemon: Running';
+                if (data.daemon_pid) runMsg += ' (PID ' + data.daemon_pid + ')';
+                if (data.rpc_port_open) runMsg += ' &mdash; RPC port 51473 open';
+                html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
+                    '<span style="color:#e3b341;">&#9888;</span>' +
+                    '<span>' + runMsg + '</span>' +
+                    '<button class="btn btn-secondary" style="padding:6px 14px;font-size:0.85em;margin-left:8px;" onclick="onStopDaemon()">Stop Daemon</button>' +
+                    '</div>';
+            }
+
+            // Blockchain sync
+            if (data.blockchain_synced) {
+                html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
+                    '<span style="color:#3fb950;">&#10003;</span>' +
+                    '<span>Blockchain data: Synced (<code>' + data.divi_data_dir + '</code>)</span></div>';
+            } else if (data.data_dir_exists) {
+                allGood = false;
+                html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
+                    '<span style="color:#e3b341;">&#9888;</span>' +
+                    '<span>Blockchain data: Not synced (data directory exists but blocks/chainstate missing)</span></div>';
+            } else {
+                allGood = false;
+                html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
+                    '<span style="color:#f85149;">&#10007;</span>' +
+                    '<span>Blockchain data: Data directory not found</span></div>';
+            }
+
+            list.innerHTML = html;
+
+            // Actions
+            if (allGood) {
+                actions.innerHTML = '<button class="btn btn-primary" onclick="goToStep(1)">Continue</button>';
+            } else {
+                var actionsHtml = '';
+                if (!data.desktop_installed) {
+                    actionsHtml += '<a href="https://diviproject.org/downloads" target="_blank" rel="noopener" class="btn btn-primary">Download Divi Desktop</a>';
+                }
+                if (!data.daemon_found) {
+                    actionsHtml += '<div class="important-note" style="width:100%;text-align:center;">Daemon not found. Set the <code>DIVI_DAEMON_PATH</code> environment variable to the path of your <code>divid</code> binary and restart the importer.</div>';
+                }
+                if (!data.blockchain_synced) {
+                    actionsHtml += '<div class="important-note" style="width:100%;text-align:center;">Please open Divi Desktop and allow the blockchain to fully sync before continuing.</div>';
+                }
+                actionsHtml += '<button class="btn btn-outline" onclick="checkPrerequisites()">Re-check</button>';
+                actions.innerHTML = actionsHtml;
+            }
+        }).catch(function(err) {
+            spinner.className = 'spinner';
+            results.style.display = 'block';
+            list.innerHTML = '<div style="color:#f85149;">Failed to check prerequisites: ' + err.message + '</div>';
+            actions.innerHTML = '<button class="btn btn-outline" onclick="checkPrerequisites()">Retry</button>';
+        });
     }
 
     // Step 1: Wallet check (server-side)
@@ -701,7 +746,9 @@
         pollTimer = setInterval(function() {
             apiGet('/api/recovery/status').then(function(data) {
                 var line = '[' + data.state + '] ' + data.message;
-                if (data.progress) line += ' (' + data.progress + ')';
+                if (data.progress && data.progress !== 'loading_blocks' && data.progress !== 'scanning' && data.progress !== 'verifying' && data.progress !== 'activating') {
+                    line += ' (' + data.progress + ')';
+                }
                 log.textContent += line + '\n';
                 log.scrollTop = log.scrollHeight;
 
@@ -726,6 +773,21 @@
             clearInterval(pollTimer);
             pollTimer = null;
         }
+    }
+
+    function onStopDaemon() {
+        showStatus('Stopping daemon...', 'info');
+        apiPost('/api/daemon/stop').then(function(data) {
+            if (data.success) {
+                showStatus(data.message, 'success', true);
+                // Re-check prerequisites after daemon stops
+                setTimeout(checkPrerequisites, 1500);
+            } else {
+                showStatus('Failed to stop daemon: ' + data.message, 'error');
+            }
+        }).catch(function(err) {
+            showStatus('Error stopping daemon: ' + err.message, 'error');
+        });
     }
 
     function onLaunchDesktop() {
@@ -772,6 +834,20 @@
             input.setAttribute('autocapitalize', 'off');
             input.setAttribute('autocorrect', 'off');
             input.placeholder = (i + 1).toString();
+            input.addEventListener('paste', function(e) {
+                var text = (e.clipboardData || window.clipboardData).getData('text');
+                var pastedWords = text.trim().split(/\s+/);
+                if (pastedWords.length > 1) {
+                    e.preventDefault();
+                    var startIdx = parseInt(this.id.replace('word', ''), 10);
+                    for (var w = 0; w < pastedWords.length && (startIdx + w) < 12; w++) {
+                        document.getElementById('word' + (startIdx + w)).value = pastedWords[w].toLowerCase();
+                    }
+                    // Focus next empty or last filled
+                    var focusIdx = Math.min(startIdx + pastedWords.length, 11);
+                    document.getElementById('word' + focusIdx).focus();
+                }
+            });
             group.appendChild(label);
             group.appendChild(input);
             grid.appendChild(group);
@@ -785,6 +861,9 @@
         }).catch(function() {
             document.getElementById('platformBadge').textContent = 'Platform: unknown (server not reachable)';
         });
+
+        // Auto-detect prerequisites on page load
+        checkPrerequisites();
     })();
 
     // Enter key triggers validation on step 2
