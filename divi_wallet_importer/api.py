@@ -6,6 +6,7 @@ import json
 import shutil
 import datetime
 import subprocess
+import sys
 import threading
 import time
 import logging
@@ -187,6 +188,9 @@ def check_prerequisites():
     except FileNotFoundError as e:
         daemon_path = str(e)
 
+    # Check if Divi Desktop app is running
+    desktop_running_info = platform_utils.find_running_desktop()
+
     # Check if daemon is running on default ports
     running_info = platform_utils.find_running_daemon()
 
@@ -213,6 +217,8 @@ def check_prerequisites():
         "daemon_pid": running_info["pid"],
         "rpc_port_open": running_info["rpc_port"],
         "p2p_port_open": running_info["p2p_port"],
+        "desktop_app_running": desktop_running_info["running"],
+        "desktop_app_pid": desktop_running_info["pid"],
     }
 
 
@@ -372,6 +378,26 @@ def clear_recovery():
     return {"success": True, "message": "Recovery state cleared."}
 
 
+def stop_desktop():
+    """Stop the running Divi Desktop application."""
+    info = platform_utils.find_running_desktop()
+    if not info["running"]:
+        return {"success": True, "message": "Divi Desktop is not running."}
+
+    logger.info("Closing Divi Desktop (PID %s)...", info.get("pid"))
+    platform_utils.terminate_desktop()
+
+    # Wait for it to close
+    for _ in range(15):
+        time.sleep(2)
+        info = platform_utils.find_running_desktop()
+        if not info["running"]:
+            logger.info("Divi Desktop closed successfully.")
+            return {"success": True, "message": "Divi Desktop closed."}
+
+    return {"success": False, "message": "Divi Desktop did not close within 30 seconds."}
+
+
 def stop_daemon():
     """Stop the running divid daemon via RPC."""
     try:
@@ -434,7 +460,14 @@ def start_recovery(mnemonic_str):
     logger.info("Launching daemon: %s", [daemon_path, '-mnemonic=[REDACTED]', '-force_rescan=1'])
 
     try:
-        subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        kwargs = {'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL}
+        if sys.platform == 'win32':
+            kwargs['creationflags'] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            )
+        else:
+            kwargs['start_new_session'] = True
+        subprocess.Popen(command, **kwargs)
     except Exception as e:
         return {"success": False, "message": "Failed to start daemon: {}".format(e)}
 

@@ -223,6 +223,77 @@ def get_daemon_path() -> str:
     )
 
 
+def find_running_desktop():
+    """Check if the Divi Desktop application is running.
+
+    Returns dict with:
+        running: bool - whether Divi Desktop appears to be running
+        pid: int or None - process ID if found
+    """
+    result = {"running": False, "pid": None}
+    plat = get_platform()
+
+    try:
+        if plat == 'macos':
+            proc = subprocess.run(
+                ['pgrep', '-f', 'Divi Desktop.app/Contents/MacOS'],
+                capture_output=True, text=True, check=False, timeout=5
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                pid = int(proc.stdout.strip().split('\n')[0])
+                result["running"] = True
+                result["pid"] = pid
+        elif plat == 'windows':
+            proc = subprocess.run(
+                ['tasklist', '/FI', 'IMAGENAME eq Divi Desktop.exe', '/FO', 'CSV', '/NH'],
+                capture_output=True, text=True, check=False, timeout=5
+            )
+            if proc.returncode == 0 and 'Divi Desktop' in proc.stdout:
+                try:
+                    pid = int(proc.stdout.strip().split(',')[1].strip('"'))
+                    result["running"] = True
+                    result["pid"] = pid
+                except (ValueError, IndexError):
+                    result["running"] = True
+        else:  # linux
+            proc = subprocess.run(
+                ['pgrep', '-f', 'divi-desktop'],
+                capture_output=True, text=True, check=False, timeout=5
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                pid = int(proc.stdout.strip().split('\n')[0])
+                result["running"] = True
+                result["pid"] = pid
+    except Exception:
+        pass
+
+    return result
+
+
+def terminate_desktop():
+    """Gracefully terminate the Divi Desktop application."""
+    plat = get_platform()
+
+    try:
+        if plat == 'macos':
+            subprocess.run(
+                ['osascript', '-e', 'tell application "Divi Desktop" to quit'],
+                capture_output=True, check=False, timeout=10
+            )
+        elif plat == 'windows':
+            subprocess.run(
+                ['taskkill', '/IM', 'Divi Desktop.exe'],
+                capture_output=True, check=False, timeout=10
+            )
+        else:  # linux
+            subprocess.run(
+                ['pkill', '-f', 'divi-desktop'],
+                capture_output=True, check=False, timeout=10
+            )
+    except Exception:
+        pass
+
+
 def get_divi_desktop_executable() -> str:
     """Returns the Divi Desktop executable path."""
     plat = get_platform()
@@ -265,15 +336,23 @@ def open_url(url: str) -> None:
 
 
 def launch_application(path: str) -> None:
-    """Launches an application at the given path."""
+    """Launches an application at the given path, fully detached from this process."""
     plat = get_platform()
 
     if plat == 'windows':
         os.startfile(path)
     elif plat == 'macos':
-        subprocess.Popen(['open', path])
+        subprocess.Popen(
+            ['open', path],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     else:  # linux
-        subprocess.Popen(['xdg-open', path])
+        subprocess.Popen(
+            ['xdg-open', path],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
 
 
 def get_base_dir() -> str:

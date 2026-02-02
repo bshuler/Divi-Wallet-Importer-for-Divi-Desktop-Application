@@ -536,6 +536,8 @@
     var statusTimeout = null;
     var serverPlatform = null;
     var pollTimer = null;
+    var daemonRunningOnPrereq = false;
+    var desktopRunningOnPrereq = false;
 
     // API helpers
     function apiGet(path) {
@@ -644,15 +646,26 @@
                     '<span>Divi Daemon: Not found</span></div>';
             }
 
+            // Desktop app running status
+            desktopRunningOnPrereq = data.desktop_app_running;
+            if (data.desktop_app_running) {
+                var desktopMsg = 'Divi Desktop: Running';
+                if (data.desktop_app_pid) desktopMsg += ' (PID ' + data.desktop_app_pid + ')';
+                html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
+                    '<span style="color:#e3b341;">&#9888;</span>' +
+                    '<span>' + desktopMsg + '. It will be closed automatically when you continue.</span>' +
+                    '</div>';
+            }
+
             // Daemon running status
+            daemonRunningOnPrereq = data.daemon_running;
             if (data.daemon_running) {
                 var runMsg = 'Divi Daemon: Running';
                 if (data.daemon_pid) runMsg += ' (PID ' + data.daemon_pid + ')';
                 if (data.rpc_port_open) runMsg += ' &mdash; RPC port 51473 open';
                 html += '<div style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.95em;">' +
                     '<span style="color:#e3b341;">&#9888;</span>' +
-                    '<span>' + runMsg + '</span>' +
-                    '<button class="btn btn-secondary" style="padding:6px 14px;font-size:0.85em;margin-left:8px;" onclick="onStopDaemon()">Stop Daemon</button>' +
+                    '<span>' + runMsg + '. It will be stopped automatically when you continue.</span>' +
                     '</div>';
             }
 
@@ -677,7 +690,7 @@
 
             // Actions
             if (allGood) {
-                actions.innerHTML = '<button class="btn btn-primary" onclick="goToStep(1)">Continue</button>';
+                actions.innerHTML = '<button class="btn btn-primary" id="continueBtn" onclick="onPrereqContinue()">Continue</button>';
             } else {
                 var actionsHtml = '';
                 if (!data.desktop_installed) {
@@ -1023,19 +1036,58 @@
         }
     }
 
-    function onStopDaemon() {
-        showStatus('Stopping daemon...', 'info');
-        apiPost('/api/daemon/stop').then(function(data) {
-            if (data.success) {
-                showStatus(data.message, 'success', true);
-                // Re-check prerequisites after daemon stops
-                setTimeout(checkPrerequisites, 1500);
-            } else {
-                showStatus('Failed to stop daemon: ' + data.message, 'error');
+    function onPrereqContinue() {
+        if (!desktopRunningOnPrereq && !daemonRunningOnPrereq) {
+            goToStep(1);
+            return;
+        }
+
+        var btn = document.getElementById('continueBtn');
+        btn.disabled = true;
+
+        // Build ordered list of shutdown steps
+        var steps = [];
+        if (desktopRunningOnPrereq) {
+            steps.push({ label: 'Closing Divi Desktop...', endpoint: '/api/desktop/stop' });
+        }
+        if (daemonRunningOnPrereq) {
+            steps.push({ label: 'Stopping daemon...', endpoint: '/api/daemon/stop' });
+        }
+
+        function runStep(i) {
+            if (i >= steps.length) {
+                hideStatus();
+                goToStep(1);
+                return;
             }
-        }).catch(function(err) {
-            showStatus('Error stopping daemon: ' + err.message, 'error');
-        });
+            btn.textContent = steps[i].label;
+            showStatus(steps[i].label.replace('...', ', please wait...'), 'info');
+            apiPost(steps[i].endpoint).then(function(data) {
+                if (data.success) {
+                    runStep(i + 1);
+                } else {
+                    // If daemon stop fails after Desktop was closed, continue anyway
+                    // (Desktop likely already stopped the daemon)
+                    if (steps[i].endpoint === '/api/daemon/stop' && desktopRunningOnPrereq) {
+                        runStep(i + 1);
+                    } else {
+                        showStatus('Failed: ' + data.message, 'error');
+                        btn.disabled = false;
+                        btn.textContent = 'Continue';
+                    }
+                }
+            }).catch(function(err) {
+                if (steps[i].endpoint === '/api/daemon/stop' && desktopRunningOnPrereq) {
+                    runStep(i + 1);
+                } else {
+                    showStatus('Error: ' + err.message, 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Continue';
+                }
+            });
+        }
+
+        runStep(0);
     }
 
     function onLaunchDesktop() {
