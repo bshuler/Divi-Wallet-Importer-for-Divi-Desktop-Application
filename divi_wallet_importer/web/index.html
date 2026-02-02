@@ -127,7 +127,36 @@
         .grid-label {
             color: #a0a0b0;
             font-size: 0.85em;
+            margin-bottom: 12px;
+        }
+        .word-count-toggle {
+            display: flex;
+            gap: 0;
+            justify-content: center;
             margin-bottom: 16px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 4px;
+            width: fit-content;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .toggle-option {
+            background: transparent;
+            border: none;
+            color: #a0a0b0;
+            padding: 8px 16px;
+            font-size: 0.85em;
+            font-family: inherit;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .toggle-option:hover { color: #e0e0e0; }
+        .toggle-option.active {
+            background: #EC2C1C;
+            color: white;
         }
         .word-grid {
             display: grid;
@@ -407,7 +436,11 @@
         <!-- STEP 2: Mnemonic entry -->
         <div class="step-section" id="step2">
             <div class="card">
-                <p class="grid-label">Enter your 12-word mnemonic seed phrase:</p>
+                <p class="grid-label" id="gridLabel">Enter your 12 or 24-word mnemonic seed phrase:</p>
+                <div class="word-count-toggle">
+                    <button class="toggle-option active" onclick="setGridSize(12)">12 words</button>
+                    <button class="toggle-option" onclick="setGridSize(24)">24 words</button>
+                </div>
                 <div class="word-grid" id="wordGrid"></div>
                 <div class="spinner" id="validationSpinner">
                     <div class="spinner-icon"></div>
@@ -766,28 +799,96 @@
         });
     }
 
-    // Step 2: Mnemonic validation (client-side, same as before)
+    // Step 2: Mnemonic validation (client-side)
+    var wordCount = 12; // current grid size (12 or 24)
+
+    function addWordInput(grid, i) {
+        var group = document.createElement('div');
+        group.className = 'word-input-group';
+        var label = document.createElement('label');
+        label.textContent = 'Word ' + (i + 1);
+        label.setAttribute('for', 'word' + i);
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'word' + i;
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        input.setAttribute('autocapitalize', 'off');
+        input.setAttribute('autocorrect', 'off');
+        input.placeholder = (i + 1).toString();
+        input.addEventListener('paste', function(e) {
+            var text = (e.clipboardData || window.clipboardData).getData('text');
+            // Split on whitespace, commas, semicolons; strip numbering like "1." or "1)"
+            var pastedWords = text.trim().split(/[\s,;]+/).map(function(w) {
+                return w.replace(/^\d+[.):\-]\s*/, '').toLowerCase();
+            }).filter(function(w) { return w && /^[a-z]+$/.test(w); });
+            if (pastedWords.length > 1) {
+                e.preventDefault();
+                var startIdx = parseInt(this.id.replace('word', ''), 10);
+                // Expand grid if pasting more than 12 words
+                if (pastedWords.length > 12 || (startIdx + pastedWords.length > 12)) {
+                    setGridSize(24);
+                }
+                for (var w = 0; w < pastedWords.length && (startIdx + w) < wordCount; w++) {
+                    document.getElementById('word' + (startIdx + w)).value = pastedWords[w];
+                }
+                // Focus next empty or last filled
+                var focusIdx = Math.min(startIdx + pastedWords.length, wordCount - 1);
+                document.getElementById('word' + focusIdx).focus();
+            }
+        });
+        group.appendChild(label);
+        group.appendChild(input);
+        grid.appendChild(group);
+    }
+
+    function setGridSize(n) {
+        if (n === wordCount) return;
+        var grid = document.getElementById('wordGrid');
+        if (n > wordCount) {
+            for (var i = wordCount; i < n; i++) { addWordInput(grid, i); }
+        } else {
+            while (grid.children.length > n) { grid.removeChild(grid.lastChild); }
+        }
+        wordCount = n;
+        document.getElementById('gridLabel').textContent =
+            'Enter your ' + n + '-word mnemonic seed phrase:';
+
+        // Update toggle button active states
+        var toggles = document.querySelectorAll('.toggle-option');
+        toggles.forEach(function(btn) {
+            var btnText = btn.textContent.trim();
+            if ((n === 12 && btnText === '12 words') || (n === 24 && btnText === '24 words')) {
+                btn.className = 'toggle-option active';
+            } else {
+                btn.className = 'toggle-option';
+            }
+        });
+    }
+
     function getWords() {
         var words = [];
-        for (var i = 0; i < 12; i++) {
+        for (var i = 0; i < wordCount; i++) {
             words.push(document.getElementById('word' + i).value.trim().toLowerCase());
         }
         return words;
     }
 
     function clearFields() {
-        for (var i = 0; i < 12; i++) {
+        for (var i = 0; i < wordCount; i++) {
             document.getElementById('word' + i).value = '';
         }
+        setGridSize(12); // reset to 12
         document.getElementById('clearNotice').className = 'clear-notice';
     }
 
     function validateBIP39(words) {
-        if (words.length !== 12) {
-            return Promise.resolve({ valid: false, error: 'Mnemonic must be exactly 12 words.' });
+        var n = words.length;
+        if (n !== 12 && n !== 24) {
+            return Promise.resolve({ valid: false, error: 'Mnemonic must be 12 or 24 words (got ' + n + ').' });
         }
         var indices = [];
-        for (var i = 0; i < words.length; i++) {
+        for (var i = 0; i < n; i++) {
             var idx = W.indexOf(words[i]);
             if (idx === -1) {
                 return Promise.resolve({ valid: false, error: 'Word "' + words[i] + '" (word ' + (i+1) + ') is not in the BIP39 wordlist.' });
@@ -798,16 +899,23 @@
         for (var j = 0; j < indices.length; j++) {
             bits += indices[j].toString(2).padStart(11, '0');
         }
-        var entropyBits = bits.slice(0, 128);
-        var checksumBits = bits.slice(128);
-        var entropyBytes = new Uint8Array(16);
-        for (var k = 0; k < 16; k++) {
+        var totalBits = n * 11;
+        var checksumLen = totalBits / 33;
+        var entropyLen = totalBits - checksumLen;
+        var entropyByteCount = entropyLen / 8;
+        var entropyBits = bits.slice(0, entropyLen);
+        var checksumBits = bits.slice(entropyLen);
+        var entropyBytes = new Uint8Array(entropyByteCount);
+        for (var k = 0; k < entropyByteCount; k++) {
             entropyBytes[k] = parseInt(entropyBits.slice(k * 8, (k + 1) * 8), 2);
         }
         return crypto.subtle.digest('SHA-256', entropyBytes).then(function(hashBuffer) {
             var hashArray = new Uint8Array(hashBuffer);
-            var hashBits = hashArray[0].toString(2).padStart(8, '0').slice(0, 4);
-            if (hashBits !== checksumBits) {
+            var hashBitsStr = '';
+            for (var b = 0; b < hashArray.length; b++) {
+                hashBitsStr += hashArray[b].toString(2).padStart(8, '0');
+            }
+            if (hashBitsStr.slice(0, checksumLen) !== checksumBits) {
                 return { valid: false, error: 'Invalid checksum. Please double-check your seed words.' };
             }
             return { valid: true };
@@ -828,7 +936,7 @@
         var words = getWords();
 
         if (words.some(function(w) { return w === ''; })) {
-            showStatus('Please fill all 12 fields before validating.', 'warning');
+            showStatus('Please fill all ' + wordCount + ' fields before validating.', 'warning');
             btn.disabled = false;
             btn.style.display = 'block';
             spinner.className = 'spinner';
@@ -869,7 +977,7 @@
                     btn.disabled = false;
                     btn.style.display = 'block';
                     setTimeout(function() {
-                        showStatus('Enter your 12-word mnemonic. Ensure all words are lowercase.', 'info', true);
+                        showStatus('Enter your mnemonic seed phrase. Ensure all words are lowercase.', 'info', true);
                     }, 3000);
                 }
             }).catch(function(e) {
@@ -1045,49 +1153,58 @@
         var btn = document.getElementById('continueBtn');
         btn.disabled = true;
 
-        // Build ordered list of shutdown steps
-        var steps = [];
         if (desktopRunningOnPrereq) {
-            steps.push({ label: 'Closing Divi Desktop...', endpoint: '/api/desktop/stop' });
-        }
-        if (daemonRunningOnPrereq) {
-            steps.push({ label: 'Stopping daemon...', endpoint: '/api/daemon/stop' });
-        }
-
-        function runStep(i) {
-            if (i >= steps.length) {
-                hideStatus();
-                goToStep(1);
-                return;
-            }
-            btn.textContent = steps[i].label;
-            showStatus(steps[i].label.replace('...', ', please wait...'), 'info');
-            apiPost(steps[i].endpoint).then(function(data) {
-                if (data.success) {
-                    runStep(i + 1);
-                } else {
-                    // If daemon stop fails after Desktop was closed, continue anyway
-                    // (Desktop likely already stopped the daemon)
-                    if (steps[i].endpoint === '/api/daemon/stop' && desktopRunningOnPrereq) {
-                        runStep(i + 1);
-                    } else {
-                        showStatus('Failed: ' + data.message, 'error');
-                        btn.disabled = false;
-                        btn.textContent = 'Continue';
-                    }
-                }
+            // Send quit signal, then poll until it exits
+            btn.textContent = 'Closing Divi Desktop...';
+            showStatus('Closing Divi Desktop, please wait...', 'info');
+            apiPost('/api/desktop/stop').then(function() {
+                var elapsed = 0;
+                var desktopPoll = setInterval(function() {
+                    elapsed += 3;
+                    btn.textContent = 'Closing Divi Desktop... (' + formatElapsed(elapsed) + ')';
+                    apiGet('/api/desktop/check').then(function(data) {
+                        if (!data.running) {
+                            clearInterval(desktopPoll);
+                            stopDaemonThenContinue(btn);
+                        }
+                    });
+                }, 3000);
             }).catch(function(err) {
-                if (steps[i].endpoint === '/api/daemon/stop' && desktopRunningOnPrereq) {
-                    runStep(i + 1);
+                showStatus('Error closing Divi Desktop: ' + err.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Continue';
+            });
+        } else {
+            stopDaemonThenContinue(btn);
+        }
+    }
+
+    function stopDaemonThenContinue(btn) {
+        if (daemonRunningOnPrereq) {
+            btn.textContent = 'Stopping daemon...';
+            showStatus('Stopping the Divi daemon, please wait...', 'info');
+            apiPost('/api/daemon/stop').then(function(data) {
+                if (data.success) {
+                    hideStatus();
+                    goToStep(1);
+                } else if (desktopRunningOnPrereq) {
+                    // Desktop likely already stopped the daemon
+                    hideStatus();
+                    goToStep(1);
                 } else {
-                    showStatus('Error: ' + err.message, 'error');
+                    showStatus('Failed to stop daemon: ' + data.message, 'error');
                     btn.disabled = false;
                     btn.textContent = 'Continue';
                 }
+            }).catch(function() {
+                // Daemon likely already gone
+                hideStatus();
+                goToStep(1);
             });
+        } else {
+            hideStatus();
+            goToStep(1);
         }
-
-        runStep(0);
     }
 
     function onLaunchDesktop() {
@@ -1126,36 +1243,7 @@
     (function() {
         var grid = document.getElementById('wordGrid');
         for (var i = 0; i < 12; i++) {
-            var group = document.createElement('div');
-            group.className = 'word-input-group';
-            var label = document.createElement('label');
-            label.textContent = 'Word ' + (i + 1);
-            label.setAttribute('for', 'word' + i);
-            var input = document.createElement('input');
-            input.type = 'text';
-            input.id = 'word' + i;
-            input.autocomplete = 'off';
-            input.spellcheck = false;
-            input.setAttribute('autocapitalize', 'off');
-            input.setAttribute('autocorrect', 'off');
-            input.placeholder = (i + 1).toString();
-            input.addEventListener('paste', function(e) {
-                var text = (e.clipboardData || window.clipboardData).getData('text');
-                var pastedWords = text.trim().split(/\s+/);
-                if (pastedWords.length > 1) {
-                    e.preventDefault();
-                    var startIdx = parseInt(this.id.replace('word', ''), 10);
-                    for (var w = 0; w < pastedWords.length && (startIdx + w) < 12; w++) {
-                        document.getElementById('word' + (startIdx + w)).value = pastedWords[w].toLowerCase();
-                    }
-                    // Focus next empty or last filled
-                    var focusIdx = Math.min(startIdx + pastedWords.length, 11);
-                    document.getElementById('word' + focusIdx).focus();
-                }
-            });
-            group.appendChild(label);
-            group.appendChild(input);
-            grid.appendChild(group);
+            addWordInput(grid, i);
         }
 
         // Fetch platform info from server

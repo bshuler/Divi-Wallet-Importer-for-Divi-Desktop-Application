@@ -8,10 +8,10 @@ from .bip39_wordlist import WORDLIST
 
 def validate_mnemonic(mnemonic: str) -> Tuple[bool, str]:
     """
-    Validate a BIP39 mnemonic seed phrase.
+    Validate a BIP39 mnemonic seed phrase (12 or 24 words).
 
     Args:
-        mnemonic: Space-separated mnemonic string (12 words expected)
+        mnemonic: Space-separated mnemonic string (12 or 24 words)
 
     Returns:
         Tuple of (success: bool, message: str)
@@ -21,9 +21,9 @@ def validate_mnemonic(mnemonic: str) -> Tuple[bool, str]:
     # Split and normalize
     words = mnemonic.strip().lower().split()
 
-    # Check word count
-    if len(words) != 12:
-        return (False, 'Mnemonic must be exactly 12 words.')
+    # Check word count — BIP39 supports 12, 15, 18, 21, 24 but we accept 12 or 24
+    if len(words) not in (12, 24):
+        return (False, 'Mnemonic must be 12 or 24 words (got {}).'.format(len(words)))
 
     # Check each word is in wordlist and get indices
     indices = []
@@ -37,21 +37,29 @@ def validate_mnemonic(mnemonic: str) -> Tuple[bool, str]:
     # Convert indices to 11-bit binary strings and concatenate
     bits = ''.join(format(idx, '011b') for idx in indices)
 
-    # Split into entropy (128 bits) and checksum (4 bits)
-    entropy_bits = bits[:128]
-    checksum_bits = bits[128:]
+    # BIP39: entropy bits = word_count * 11 - checksum_bits
+    # checksum_bits = entropy_bits / 32
+    # 12 words: 128 entropy + 4 checksum = 132 bits
+    # 24 words: 256 entropy + 8 checksum = 264 bits
+    total_bits = len(words) * 11
+    checksum_len = total_bits // 33  # CS = ENT / 32, and ENT = total - CS, so CS = total / 33
+    entropy_len = total_bits - checksum_len
+    entropy_bytes_count = entropy_len // 8
+
+    entropy_bits = bits[:entropy_len]
+    checksum_bits = bits[entropy_len:]
 
     # Convert entropy bits to bytes
     entropy_bytes = bytearray()
-    for i in range(16):
+    for i in range(entropy_bytes_count):
         byte_bits = entropy_bits[i * 8:(i + 1) * 8]
         entropy_bytes.append(int(byte_bits, 2))
 
     # Compute SHA-256 hash
     hash_bytes = hashlib.sha256(entropy_bytes).digest()
 
-    # Extract first 4 bits of hash
-    hash_bits = format(hash_bytes[0], '08b')[:4]
+    # Extract checksum from hash
+    hash_bits = ''.join(format(b, '08b') for b in hash_bytes)[:checksum_len]
 
     # Compare checksums
     if hash_bits != checksum_bits:
