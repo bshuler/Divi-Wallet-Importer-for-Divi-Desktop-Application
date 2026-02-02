@@ -25,6 +25,7 @@ class MnemonicRedactionFilter(logging.Filter):
     """Scrub mnemonic seed phrases from all log output."""
     def filter(self, record):
         record.msg = re.sub(r'-mnemonic=[^\s\]]+', '-mnemonic=[REDACTED]', str(record.msg))
+        record.msg = re.sub(r'mnemonic=[^\s\]]+', 'mnemonic=[REDACTED]', str(record.msg))
         if hasattr(record, 'args') and record.args:
             record.args = tuple(
                 re.sub(r'-mnemonic=[^\s\]]+', '-mnemonic=[REDACTED]', str(a))
@@ -133,6 +134,78 @@ def _clear_state():
             os.remove(path)
     except OSError:
         pass
+
+
+def _write_mnemonic_to_conf(mnemonic_str):
+    """Write mnemonic and force_rescan to divi.conf temporarily."""
+    divi_dir = platform_utils.get_divi_data_dir()
+    conf_path = os.path.join(divi_dir, 'divi.conf')
+
+    # Read existing conf (if any)
+    existing_lines = []
+    if os.path.exists(conf_path):
+        try:
+            with open(conf_path, 'r') as f:
+                existing_lines = f.readlines()
+        except OSError as e:
+            logger.warning("Could not read existing divi.conf: %s", e)
+
+    # Remove any existing mnemonic/force_rescan lines (in case they're leftover)
+    cleaned_lines = [
+        line for line in existing_lines
+        if not line.startswith('mnemonic=') and not line.startswith('mnemonicpassphrase=') and not line.startswith('force_rescan=')
+    ]
+
+    # Append new mnemonic settings with marker
+    cleaned_lines.append('\n# Added by Divi Wallet Importer\n')
+    cleaned_lines.append('mnemonic={}\n'.format(mnemonic_str))
+    cleaned_lines.append('force_rescan=1\n')
+
+    # Write with restrictive permissions
+    try:
+        with open(conf_path, 'w') as f:
+            f.writelines(cleaned_lines)
+        os.chmod(conf_path, 0o600)
+        logger.info("Wrote mnemonic to divi.conf (will be removed after daemon starts)")
+    except OSError as e:
+        raise Exception("Failed to write mnemonic to divi.conf: {}".format(e))
+
+
+def _remove_mnemonic_from_conf():
+    """Remove mnemonic and force_rescan lines from divi.conf."""
+    divi_dir = platform_utils.get_divi_data_dir()
+    conf_path = os.path.join(divi_dir, 'divi.conf')
+
+    if not os.path.exists(conf_path):
+        return
+
+    try:
+        with open(conf_path, 'r') as f:
+            lines = f.readlines()
+    except OSError as e:
+        logger.warning("Could not read divi.conf for cleanup: %s", e)
+        return
+
+    # Remove mnemonic, force_rescan, and marker lines
+    cleaned_lines = []
+    skip_next_newline = False
+    for line in lines:
+        if line.strip() == '# Added by Divi Wallet Importer':
+            skip_next_newline = True
+            continue
+        if line.startswith('mnemonic=') or line.startswith('mnemonicpassphrase=') or line.startswith('force_rescan='):
+            continue
+        if skip_next_newline and line.strip() == '':
+            skip_next_newline = False
+            continue
+        cleaned_lines.append(line)
+
+    try:
+        with open(conf_path, 'w') as f:
+            f.writelines(cleaned_lines)
+        logger.info("Removed mnemonic from divi.conf")
+    except OSError as e:
+        logger.warning("Could not write cleaned divi.conf: %s", e)
 
 
 def _auto_launch_desktop():
@@ -378,24 +451,24 @@ def clear_recovery():
     return {"success": True, "message": "Recovery state cleared."}
 
 
+def check_desktop_running():
+    """Check if Divi Desktop is currently running."""
+    info = platform_utils.find_running_desktop()
+    return {"running": info["running"], "pid": info["pid"]}
+
+
 def stop_desktop():
-    """Stop the running Divi Desktop application."""
+    """Send a quit signal to Divi Desktop (non-blocking).
+
+    Callers should poll check_desktop_running() to wait for it to actually exit.
+    """
     info = platform_utils.find_running_desktop()
     if not info["running"]:
         return {"success": True, "message": "Divi Desktop is not running."}
 
     logger.info("Closing Divi Desktop (PID %s)...", info.get("pid"))
     platform_utils.terminate_desktop()
-
-    # Wait for it to close
-    for _ in range(15):
-        time.sleep(2)
-        info = platform_utils.find_running_desktop()
-        if not info["running"]:
-            logger.info("Divi Desktop closed successfully.")
-            return {"success": True, "message": "Divi Desktop closed."}
-
-    return {"success": False, "message": "Divi Desktop did not close within 30 seconds."}
+    return {"success": True, "message": "Quit signal sent to Divi Desktop."}
 
 
 def stop_daemon():
@@ -455,9 +528,15 @@ def start_recovery(mnemonic_str):
     except RPCConnectionError:
         pass  # No conf or daemon not running — fine
 
-    # Step 2: Launch daemon with mnemonic
-    command = [daemon_path, '-mnemonic={}'.format(mnemonic_str), '-force_rescan=1']
-    logger.info("Launching daemon: %s", [daemon_path, '-mnemonic=[REDACTED]', '-force_rescan=1'])
+    # Step 2: Write mnemonic to divi.conf
+    try:
+        _write_mnemonic_to_conf(mnemonic_str)
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+    # Step 3: Launch daemon (will read mnemonic from conf)
+    command = [daemon_path]
+    logger.info("Launching daemon: %s", daemon_path)
 
     try:
         kwargs = {'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL}
@@ -475,7 +554,7 @@ def start_recovery(mnemonic_str):
     _recovery_start_time = time.time()
     _set_status("running", "Daemon started. Waiting for RPC to become available...", "", "starting")
 
-    # Step 3: Wait for RPC to become available (daemon needs time to start)
+    # Step 4: Wait for RPC to become available (daemon needs time to start)
     logger.info("Waiting for daemon RPC to become available...")
     rpc_ready = False
     for _ in range(30):
@@ -492,11 +571,14 @@ def start_recovery(mnemonic_str):
         except RPCConnectionError:
             pass  # Not ready yet
 
+    # Step 5: Remove mnemonic from divi.conf (always, whether RPC is ready or not)
+    _remove_mnemonic_from_conf()
+
     if not rpc_ready:
         logger.warning("Daemon RPC did not become available within 60 seconds.")
         # Don't fail — it might just be slow. Monitor thread will handle it.
 
-    # Step 4: Check wallet.dat exists within 15s
+    # Step 6: Check wallet.dat exists within 15s
     divi_dir = platform_utils.get_divi_data_dir()
     wallet_path = os.path.join(divi_dir, 'wallet.dat')
     wallet_found = False

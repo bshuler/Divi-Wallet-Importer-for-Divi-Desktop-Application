@@ -114,6 +114,8 @@ class _RequestHandler(BaseHTTPRequestHandler):
             self._send_json(api.get_recovery_status())
         elif self.path == "/api/recovery/check":
             self._send_json(api.check_recovery_in_progress())
+        elif self.path == "/api/desktop/check":
+            self._send_json(api.check_desktop_running())
         else:
             self._send_json({"error": "Not found"}, 404)
 
