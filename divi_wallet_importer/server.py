@@ -129,6 +129,10 @@ class _RequestHandler(BaseHTTPRequestHandler):
         if not self._check_token():
             return
 
+        if self.path == "/api/desktop/stop":
+            self._send_json(api.stop_desktop())
+            return
+
         if self.path == "/api/daemon/stop":
             self._send_json(api.stop_daemon())
             return
