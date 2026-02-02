@@ -1,0 +1,72 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: divi-wallet-importer.exe
+            sep: ";"
+          - os: macos-latest
+            artifact: divi-wallet-importer-macos
+            sep: ":"
+          - os: ubuntu-latest
+            artifact: divi-wallet-importer-linux
+            sep: ":"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build binary
+        run: >
+          pyinstaller
+          --onefile
+          --console
+          --name divi-wallet-importer
+          --add-data "divi_wallet_importer/web/index.html${{ matrix.sep }}divi_wallet_importer/web"
+          divi_wallet_importer/__main__.py
+
+      - name: Rename artifact (Unix)
+        if: runner.os != 'Windows'
+        run: mv dist/divi-wallet-importer dist/${{ matrix.artifact }}
+
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        run: ren dist\divi-wallet-importer.exe ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            divi-wallet-importer.exe
+            divi-wallet-importer-macos
+            divi-wallet-importer-linux

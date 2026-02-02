@@ -25,7 +25,13 @@ def _find_free_port():
 
 def _load_index_html(port, token):
     """Load index.html from package and inject API_BASE and TOKEN."""
-    if sys.version_info >= (3, 9):
+    if getattr(sys, 'frozen', False):
+        # Running inside a PyInstaller bundle
+        base = sys._MEIPASS
+        path = os.path.join(base, 'divi_wallet_importer', 'web', 'index.html')
+        with open(path, 'r', encoding='utf-8') as f:
+            html = f.read()
+    elif sys.version_info >= (3, 9):
         from importlib.resources import files
         html = files("divi_wallet_importer.web").joinpath("index.html").read_text(encoding="utf-8")
     else:
