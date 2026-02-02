@@ -12,19 +12,12 @@ The **Divi Wallet Importer** helps you securely import your 12-word mnemonic see
 
 ### Installation
 
-**Requirements**: Python 3.8 or later. No additional packages needed.
-
-#### macOS
-
-macOS ships with Python 3 on recent versions. Open **Terminal** and run:
-
-```bash
-pip3 install git+https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application.git
-```
-
-If you get a "command not found" error, install Python from [python.org/downloads](https://www.python.org/downloads/) and try again.
-
 #### Windows
+
+Download **`divi-wallet-importer.exe`** from the [latest release](https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application/releases/latest) and double-click to run. No Python required.
+
+<details>
+<summary>Alternative: install with pip</summary>
 
 1. Install Python from [python.org/downloads](https://www.python.org/downloads/) (check **"Add Python to PATH"** during install)
 2. Open **Command Prompt** or **PowerShell** and run:
@@ -38,6 +31,28 @@ If `pip` is not recognized, try `py -m pip` instead:
 ```bash
 py -m pip install git+https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application.git
 ```
+</details>
+
+#### macOS
+
+macOS ships with Python 3 on recent versions. Open **Terminal** and run:
+
+```bash
+pip3 install git+https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application.git
+```
+
+If you get a "command not found" error, install Python from [python.org/downloads](https://www.python.org/downloads/) and try again.
+
+<details>
+<summary>Alternative: standalone binary</summary>
+
+Download **`divi-wallet-importer-macos`** from the [latest release](https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application/releases/latest), then:
+
+```bash
+chmod +x divi-wallet-importer-macos
+./divi-wallet-importer-macos
+```
+</details>
 
 #### Linux
 
@@ -56,6 +71,17 @@ Then install:
 ```bash
 pip3 install git+https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application.git
 ```
+
+<details>
+<summary>Alternative: standalone binary</summary>
+
+Download **`divi-wallet-importer-linux`** from the [latest release](https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application/releases/latest), then:
+
+```bash
+chmod +x divi-wallet-importer-linux
+./divi-wallet-importer-linux
+```
+</details>
 
 #### Install from source
 
