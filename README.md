@@ -12,27 +12,58 @@ The **Divi Wallet Importer** helps you securely import your 12-word mnemonic see
 
 ### Installation
 
-Install directly from GitHub:
+**Requirements**: Python 3.8 or later. No additional packages needed.
+
+#### macOS
+
+macOS ships with Python 3 on recent versions. Open **Terminal** and run:
+
+```bash
+pip3 install git+https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application.git
+```
+
+If you get a "command not found" error, install Python from [python.org/downloads](https://www.python.org/downloads/) and try again.
+
+#### Windows
+
+1. Install Python from [python.org/downloads](https://www.python.org/downloads/) (check **"Add Python to PATH"** during install)
+2. Open **Command Prompt** or **PowerShell** and run:
 
 ```bash
 pip install git+https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application.git
 ```
 
-Or clone and install locally:
+If `pip` is not recognized, try `py -m pip` instead:
+
+```bash
+py -m pip install git+https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application.git
+```
+
+#### Linux
+
+Most distributions include Python 3. You may need to install `pip` first:
+
+```bash
+# Debian/Ubuntu
+sudo apt install python3-pip
+
+# Fedora
+sudo dnf install python3-pip
+```
+
+Then install:
+
+```bash
+pip3 install git+https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application.git
+```
+
+#### Install from source
 
 ```bash
 git clone https://github.com/AustinCGomez/Divi-Wallet-Importer-for-Divi-Desktop-Application.git
 cd Divi-Wallet-Importer-for-Divi-Desktop-Application
 pip install .
 ```
-
-For development:
-
-```bash
-pip install -e .
-```
-
-**Requirements**: Python 3.8 or later. No additional packages needed.
 
 ### Usage
 
@@ -59,6 +90,7 @@ Runs entirely in the terminal with text prompts.
 | `--cli` | Run in terminal-only mode (no browser) |
 | `--port PORT` | Use a specific port (default: auto-select) |
 | `--no-open` | Start server without opening browser |
+| `--clear` | Clear any in-progress recovery state and start fresh |
 
 You can also run as a module:
 
@@ -71,14 +103,14 @@ python -m divi_wallet_importer
 1. **Install Divi Desktop**: Download from [diviproject.org/downloads](https://diviproject.org/downloads)
 2. **Sync Divi Desktop**: Allow it to fully sync with the blockchain
 3. **Close Divi Desktop**: Shut it down before running the importer
-4. **Run Divi Wallet Importer**: Follow the wizard to enter your 12-word seed phrase (lowercase)
-5. **Wait for recovery**: The importer will start the Divi daemon and monitor progress
-6. **Divi Desktop opens**: When recovery is ready, launch Divi Desktop from the wizard
+4. **Run Divi Wallet Importer**: Follow the wizard to enter your 12-word seed phrase
+5. **Wait for wallet recovery**: The importer starts the Divi daemon and recreates your wallet from the seed phrase
+6. **Divi Desktop launches automatically**: Once your wallet is recovered, Divi Desktop opens and finishes syncing on its own
 7. **Close encrypt popup**: When the "Encrypt Wallet" popup appears, dismiss it for now
 8. **Check your balance**: Confirm funds have migrated
 9. **Restart and encrypt**: Close Divi Desktop, reopen it, then set a password to encrypt your wallet
 
-> **Note:** Seed words from Divi Wallet are displayed in UPPERCASE, but must be entered in **lowercase** for the recovery to work.
+If you close the importer during recovery, run it again and it will detect the in-progress recovery and offer to resume.
 
 ### Cross-Platform Support
 
@@ -93,7 +125,6 @@ python -m divi_wallet_importer
 | Variable | Purpose |
 |----------|---------|
 | `DIVI_DAEMON_PATH` | Full path to the `divid` binary |
-| `DIVI_CLI_PATH` | Full path to the `divi-cli` binary |
 
 ### Troubleshooting
 
