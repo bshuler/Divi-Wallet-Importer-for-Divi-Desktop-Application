@@ -35,6 +35,19 @@ py -m pip install git+https://github.com/bshuler/Divi-Wallet-Importer-for-Divi-D
 
 #### macOS
 
+Download **`divi-wallet-importer-macos`** from the [latest release](https://github.com/bshuler/Divi-Wallet-Importer-for-Divi-Desktop-Application/releases/latest), then open **Terminal** and run:
+
+```bash
+xattr -d com.apple.quarantine ~/Downloads/divi-wallet-importer-macos
+chmod +x ~/Downloads/divi-wallet-importer-macos
+~/Downloads/divi-wallet-importer-macos
+```
+
+The `xattr` command removes the macOS quarantine flag that blocks unsigned downloads from running.
+
+<details>
+<summary>Alternative: install with pip</summary>
+
 macOS ships with Python 3 on recent versions. Open **Terminal** and run:
 
 ```bash
@@ -42,16 +55,6 @@ pip3 install git+https://github.com/bshuler/Divi-Wallet-Importer-for-Divi-Deskto
 ```
 
 If you get a "command not found" error, install Python from [python.org/downloads](https://www.python.org/downloads/) and try again.
-
-<details>
-<summary>Alternative: standalone binary</summary>
-
-Download **`divi-wallet-importer-macos`** from the [latest release](https://github.com/bshuler/Divi-Wallet-Importer-for-Divi-Desktop-Application/releases/latest), then:
-
-```bash
-chmod +x divi-wallet-importer-macos
-./divi-wallet-importer-macos
-```
 </details>
 
 #### Linux
